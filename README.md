@@ -16,4 +16,20 @@
 - (In visual select) `S<any key>` - surround selection in provided key (useful for surrounding in braces, quotes or HTML tags)
 - `\` - Open neotree
 - (While in neotree) `?` - Show available commands
+- `g<movement>c` - Toggle comment for that movement
+
+## Recommended workflow
+
+It is recommended to install Tmux alongside NeoVim to allow processes such as dev servers to persist. <br><br>
+Install tmux using `sudo apt install tmux`. <br>
+To get tmux working optimally alongside neovim, copy this configuration into ~/.tmux.conf:
+
+```
+set-option -g focus-events on
+set-option -sg escape-time 10
+set-option -a terminal-features 'xterm-256color:RGB'
+set -g status-style bg=#003052
+```
+
+You should see no tmux related errors when running :healthcheck
 
