@@ -2,6 +2,7 @@
 
 ## Pre-requisites
 
+- Ripgrep must be installed: `sudo apt install ripgrep`
 - Nerd font must be installed:
   - Run: `git clone --depth=1 https://github.com/ryanoasis/nerd-fonts`
   - Run: `cd nerd-fonts && ./install.sh Hack`
