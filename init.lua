@@ -2,6 +2,11 @@
 vim.g.mapleader = ' '
 vim.g.maplocalleader = ' '
 
+vim.o.ts = 4
+vim.o.sts = 4
+vim.o.sw = 4
+vim.o.et = true
+
 vim.g.have_nerd_font = true
 
 -- Make line numbers default
@@ -526,7 +531,17 @@ require('lazy').setup({
                 -- python = { "isort", "black" },
                 --
                 -- You can use 'stop_after_first' to run the first available formatter from the list
-                -- javascript = { "prettierd", "prettier", stop_after_first = true },
+                javascript = { 'prettier' },
+                typescript = { 'prettier' },
+                javascriptreact = { 'prettier' },
+                typescriptreact = { 'prettier' },
+                css = { 'prettier' },
+                html = { 'prettier' },
+                yaml = { 'prettier' },
+                markdown = { 'prettier' },
+                graphql = { 'prettier' },
+                json = { 'prettier' },
+                jsonc = { 'prettier' },
             },
         },
     },
