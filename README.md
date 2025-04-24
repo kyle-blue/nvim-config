@@ -17,7 +17,7 @@
 - (In visual select) `S<any key>` - surround selection in provided key (useful for surrounding in braces, quotes or HTML tags)
 - `\` - Open neotree
 - (While in neotree) `?` - Show available commands
-- `g<movement>c` - Toggle comment for that movement
+- `gc<movement>` - Toggle comment for that movement
 
 ## Recommended workflow
 
@@ -33,4 +33,3 @@ set -g status-style bg=#003052
 ```
 
 You should see no tmux related errors when running :healthcheck
-
