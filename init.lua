@@ -1,5 +1,29 @@
+local is_win = function()
+    return package.config.sub(1, 1) == '\\'
+end
+
+local get_path_sep = function()
+    local sep = '/'
+    if is_win() then
+        sep = '//'
+    end
+    return sep
+end
+
+local get_current_file_dir = function()
+    local file_path = debug.getinfo(2, 'S').source:sub(2)
+    if is_win() then
+        file_path = file_path:gsub('/', '\\')
+    end
+    return file_path:match('(.*' .. get_path_sep() .. ')')
+end
+
+-- Add nvim config to package.path so it can search here
+package.path = package.path .. ';' .. get_current_file_dir() .. '?.lua'
+
 require 'base_config'
 require 'nvim-project-configuration'
+require 'custom.run_file_on_save'
 
 -- [[ Install `lazy.nvim` plugin manager ]]
 local lazypath = vim.fn.stdpath 'data' .. '/lazy/lazy.nvim'
