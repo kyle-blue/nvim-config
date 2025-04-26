@@ -1,5 +1,4 @@
 -- Personal plugin that allows execution of current file on save, showing result in vsplit buffer
--- Currently supports python (detects poetry if exists), and nodejs
 
 local util = require 'util'
 
@@ -30,9 +29,19 @@ local function get_file_type(file_path)
     return FileType.Unknown
 end
 
+local function on_save(command, bufnr)
+    local cmd_info = vim.system(command):wait()
+    local full_output = cmd_info.stdout or ''
+    if cmd_info.stderr and cmd_info.stderr ~= '' then
+        full_output = full_output .. '\n\n--- STDERR ---\n\n' .. cmd_info.stderr
+    end
+
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, util.str_to_table_output(full_output))
+end
+
 local run_file_on_save = function(_)
     local original_buf = vim.fn.getbufinfo(vim.api.nvim_get_current_buf())[1]
-    local code_run_buf = util.create_v_split_window()
+    local output_buf = util.create_v_split_window()
 
     local command = {}
     local file_path = vim.fs.normalize(original_buf.name)
@@ -52,20 +61,42 @@ local run_file_on_save = function(_)
         command = { 'echo', '"Unknown file type"' }
     end
 
-    local cmd_info = vim.system(command):wait()
-    local full_output = cmd_info.stdout or ''
-    if cmd_info.stderr then
-        full_output = full_output .. '\n\n--- STDERR ---\n\n' .. cmd_info.stderr
-    end
+    -- Run on command first time around
+    on_save(command, output_buf.bufnr)
 
-    vim.api.nvim_buf_set_lines(code_run_buf.bufnr, 0, -1, false, util.str_to_table_output(full_output))
+    local on_save_group = vim.api.nvim_create_augroup('kblue-run-on-save', { clear = true })
+    vim.api.nvim_create_autocmd('BufWritePost', {
+        group = on_save_group,
+        pattern = file_path,
+        callback = function()
+            on_save(command, output_buf.bufnr)
+        end,
+    })
+    local output_buf_unload_group = vim.api.nvim_create_augroup('kblue-output-buf-unload', { clear = true })
+    vim.api.nvim_create_autocmd({ 'BufUnload', 'BufHidden' }, {
+        group = output_buf_unload_group,
+        buffer = output_buf.bufnr,
+        once = true,
+        callback = function(_)
+            vim.api.nvim_clear_autocmds { group = on_save_group }
+        end,
+    })
+    local original_buf_unload_group = vim.api.nvim_create_augroup('kblue-original-buf-unload', { clear = true })
+    vim.api.nvim_create_autocmd({ 'BufUnload', 'BufHidden' }, {
+        group = original_buf_unload_group,
+        buffer = original_buf.bufnr,
+        once = true,
+        callback = function(_)
+            vim.api.nvim_clear_autocmds { group = output_buf_unload_group }
+            vim.api.nvim_win_close(output_buf.winnr, false)
+            vim.api.nvim_buf_delete(output_buf.bufnr, { force = false, unload = true })
+            vim.api.nvim_clear_autocmds { group = on_save_group }
+        end,
+    })
 end
 
 vim.api.nvim_create_user_command(
     'RunFileOnSave',
     run_file_on_save,
-    { desc = 'Run the current file in vsplit window when saved.\nCurrently supports python and nodejs.' }
+    { desc = 'Run the current file in vsplit window when saved.\nCurrently supports python, nodejs (ts and js), rust, and raw lua' }
 )
-
--- Create user command to attach and detach
--- Auto detach on buf close of either one (left or right) and clear autocmd
