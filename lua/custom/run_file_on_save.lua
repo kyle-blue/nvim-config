@@ -1,6 +1,8 @@
 -- Personal plugin that allows execution of current file on save, showing result in vsplit buffer
 -- Currently supports python (detects poetry if exists), and nodejs
 
+local util = require 'util'
+
 local FileType = {
     Python = {},
     Js = {},
@@ -9,31 +11,6 @@ local FileType = {
     Lua = {},
     Unknown = {},
 }
-
-local function print_table(table)
-    if type(table) ~= 'table' then
-        return print 'Error: tried to print non-table type in print_table'
-    end
-    if table[1] ~= nil then
-        for index, value in ipairs(table) do
-            print(index .. ': ' .. value)
-        end
-    else
-        for key, value in pairs(table) do
-            print(key .. ': ' .. value)
-        end
-    end
-end
-
-local function create_v_split_window()
-    local new_buf = vim.api.nvim_create_buf(false, true)
-    local new_win = vim.api.nvim_open_win(new_buf, false, { split = 'right' })
-
-    return {
-        bufnr = new_buf,
-        winnr = new_win,
-    }
-end
 
 local function get_file_type(file_path)
     local extension = string.match(file_path, '.-%.(%w+)$')
@@ -55,27 +32,14 @@ end
 
 local run_file_on_save = function(_)
     local original_buf = vim.fn.getbufinfo(vim.api.nvim_get_current_buf())[1]
-    local code_run_buf = create_v_split_window()
+    local code_run_buf = util.create_v_split_window()
 
     local command = {}
     local file_path = vim.fs.normalize(original_buf.name)
     local file_type = get_file_type(file_path)
     if file_type == FileType.Python then
-        command = { 'python3', file_path }
-        -- %1 is the capture, - is the same as * (but returns the minimum match instead)
-        local poetry_env_location = vim.system({ 'poetry', 'env', 'info', '-p' }):wait().stdout:gsub('^%s*(.-)%s*$', '%1')
-        if poetry_env_location ~= nil and vim.fn.isdirectory(poetry_env_location) == 1 then
-            local python_path = vim.fs.joinpath(poetry_env_location, '/bin', '/python3')
-            command = { python_path, file_path }
-        else
-            local bin_path = vim.fs.find('bin', { type = 'directory' })
-            local python_path = #bin_path == 1 and vim.fs.find('python3', { path = bin_path[1] })
-            local is_regular_venv = #bin_path == 1 and #python_path == 1
-            if is_regular_venv then
-                ---@diagnostic disable-next-line
-                command = { python_path[1], file_path }
-            end
-        end
+        local python_path = util.get_python_path()
+        command = { python_path, file_path }
     elseif file_type == FileType.Js then
         command = { 'node', file_path }
     elseif file_type == FileType.Ts then
@@ -93,22 +57,8 @@ local run_file_on_save = function(_)
     if cmd_info.stderr then
         full_output = full_output .. '\n\n--- STDERR ---\n\n' .. cmd_info.stderr
     end
-    local full_output_table = {}
-    local should_add_new_line = false
-    for str in full_output:gmatch '([^\n]*)' do
-        local is_new_line = str == ''
-        if is_new_line and should_add_new_line == false then
-            -- Only add consequetive newlines, since newlines are added by default on each table item
-            should_add_new_line = true
-        elseif is_new_line and should_add_new_line then
-            table.insert(full_output_table, '')
-        else
-            table.insert(full_output_table, str)
-            should_add_new_line = false
-        end
-    end
 
-    vim.api.nvim_buf_set_lines(code_run_buf.bufnr, 0, -1, false, full_output_table)
+    vim.api.nvim_buf_set_lines(code_run_buf.bufnr, 0, -1, false, util.str_to_table_output(full_output))
 end
 
 vim.api.nvim_create_user_command(
