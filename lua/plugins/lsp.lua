@@ -151,21 +151,14 @@ return {
             --  - settings (table): Override the default settings passed when initializing the server.
             --        For example, to see the options for `lua_ls`, you could go to: https://luals.github.io/wiki/settings/
             local servers = {
-                pylsp = {
+                pyright = {
                     settings = {
-                        pylsp = {
-                            plugins = {
-                                autopep8 = { enabled = false },
-                                mccabe = { enabled = false },
-                                preload = { enabled = false },
-                                pycodestyle = { enabled = false },
-                                pyflakes = { enabled = false },
-                                pylint = { enabled = true },
-                                yapf = { enabled = false },
-                            },
+                        pyright = {
+                            disableOrganizeImports = true, -- Using Ruff
                         },
                     },
                 },
+                ruff = {},
                 rust_analyzer = {},
                 ts_ls = {},
                 lua_ls = {
