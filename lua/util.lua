@@ -1,17 +1,38 @@
----@param table table table to print
-local function print_table(table)
+local function table_to_str(table, indent)
+    if indent == nil then
+        indent = 0
+    end
+    local indent_txt = (' '):rep(indent)
+    local out = ''
+
     if type(table) ~= 'table' then
         return print 'Error: tried to print non-table type in print_table'
     end
     if table[1] ~= nil then
         for index, value in ipairs(table) do
-            print(index .. ': ' .. value)
+            if type(value) == 'table' then
+                out = out .. index .. '::' .. '\n'
+                out = out .. table_to_str(value, indent + 2) .. '\n'
+            else
+                out = out .. indent_txt .. index .. ': ' .. value .. '\n'
+            end
         end
     else
         for key, value in pairs(table) do
-            print(key .. ': ' .. value)
+            if type(value) == 'table' then
+                out = out .. key .. '::' .. '\n'
+                out = out .. table_to_str(value, indent + 2) .. '\n'
+            else
+                out = out .. indent_txt .. key .. ': ' .. tostring(value) .. '\n'
+            end
         end
     end
+    return out
+end
+
+---@param table table table to print
+local function print_table(table)
+    print(table_to_str(table))
 end
 
 --- Creates a new empty scratch buffer and places it to the right of the current window
@@ -74,4 +95,5 @@ return {
     create_v_split_window = create_v_split_window,
     str_to_table_output = str_to_table_output,
     get_python_path = get_python_path,
+    table_to_str = table_to_str,
 }
