@@ -34,3 +34,10 @@ set -g status-style bg=#003052
 ```
 
 You should see no tmux related errors when running :healthcheck
+
+## Todos
+
+- Add keybinds enum file
+- Change diagnostics formatting on qflist and location list?
+- Add some insert mode keybinds e.g. delete recent word (instead of having to first go into normal mode, also useful for rename refactor)
+- Get lua treesitter next function working
