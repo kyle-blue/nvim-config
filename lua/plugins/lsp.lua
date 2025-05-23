@@ -158,6 +158,7 @@ return {
                         },
                     },
                 },
+
                 ruff = {},
                 rust_analyzer = {},
                 ts_ls = {},
@@ -168,6 +169,16 @@ return {
                                 callSnippet = 'Replace',
                             },
                         },
+                    },
+                },
+                prettier = {
+                    filetypes = {
+                        'json',
+                        'jsonc',
+                        'ts',
+                        'tsx',
+                        'js',
+                        'jsx',
                     },
                 },
                 jsonls = {
