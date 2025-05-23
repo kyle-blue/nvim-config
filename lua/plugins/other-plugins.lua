@@ -33,4 +33,10 @@ return {
     {
         'tpope/vim-sleuth', -- Plugin which infers and sets tabwidth and other whitespace settings based of local project files
     },
+    { -- Plugin which highlights colors such as #ffffff
+        'catgoose/nvim-colorizer.lua',
+        event = 'BufReadPre',
+        opts = { -- set to setup table
+        },
+    },
 }
