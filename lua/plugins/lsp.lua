@@ -161,7 +161,6 @@ return {
 
                 ruff = {},
                 rust_analyzer = {},
-                ts_ls = {},
                 lua_ls = {
                     settings = {
                         Lua = {
