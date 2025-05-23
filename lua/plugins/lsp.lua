@@ -181,6 +181,8 @@ return {
                         'jsx',
                     },
                 },
+                cssls = {},
+                html = {},
                 jsonls = {
                     filetypes = { 'json', 'jsonc' },
                     settings = {
