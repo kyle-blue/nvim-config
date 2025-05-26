@@ -11,6 +11,7 @@
   - Run: `sudo add-apt-repository ppa:neovim-ppa/unstable && sudo apt update && sudo apt install neovim`
 - Clone this repository into your nvim config directory, which is usually `~/.config/nvim`
 - For styled components linting run: `npm i -g @styled/typescript-styled-plugin typescript-styled-plugin`
+- Install Go for golang (gopls) language server
 
 ## Notable keybinds
 

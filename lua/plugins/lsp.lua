@@ -158,7 +158,7 @@ return {
                         },
                     },
                 },
-
+                gopls = {},
                 ruff = {},
                 rust_analyzer = {},
                 lua_ls = {
