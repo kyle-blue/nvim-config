@@ -13,6 +13,7 @@
 - For styled components linting run: `npm i -g @styled/typescript-styled-plugin typescript-styled-plugin`
 - Install Go for golang (gopls) language server
 - Templ CLI (which includes LSP)
+- Install tailwindcss lsp: `npm install -g @tailwindcss/language-server`
 
 ## Notable keybinds
 
