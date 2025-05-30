@@ -151,25 +151,12 @@ return {
             --  - settings (table): Override the default settings passed when initializing the server.
             --        For example, to see the options for `lua_ls`, you could go to: https://luals.github.io/wiki/settings/
             local servers = {
-                pyright = {
-                    settings = {
-                        pyright = {
-                            disableOrganizeImports = true, -- Using Ruff
-                        },
-                    },
-                },
-                gopls = {},
-                ruff = {},
-                rust_analyzer = {},
-                lua_ls = {
-                    settings = {
-                        Lua = {
-                            completion = {
-                                callSnippet = 'Replace',
-                            },
-                        },
-                    },
-                },
+                -- HTML(X)
+                --
+                html = {},
+                htmx = {},
+                templ = {},
+                tailwindcss = {},
                 prettier = {
                     filetypes = {
                         'json',
@@ -181,7 +168,33 @@ return {
                     },
                 },
                 cssls = {},
-                html = {},
+                gopls = {},
+
+                pyright = {
+                    settings = {
+                        pyright = {
+                            disableOrganizeImports = true, -- Using Ruff
+                        },
+                    },
+                },
+
+                ruff = {},
+                rust_analyzer = {},
+
+                lua_ls = {
+                    settings = {
+                        Lua = {
+                            completion = {
+                                callSnippet = 'Replace',
+                            },
+                        },
+                    },
+                },
+
+                dockerls = {},
+
+                ts_ls = {},
+
                 jsonls = {
                     filetypes = { 'json', 'jsonc' },
                     settings = {

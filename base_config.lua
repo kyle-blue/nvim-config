@@ -105,3 +105,6 @@ vim.api.nvim_create_autocmd('TextYankPost', {
         vim.highlight.on_yank()
     end,
 })
+
+-- CUSTOM Filetypes
+vim.filetype.add { extension = { templ = 'templ' } }
