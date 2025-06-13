@@ -195,6 +195,8 @@ return {
 
                 ts_ls = {},
 
+                terraform = {},
+
                 jsonls = {
                     filetypes = { 'json', 'jsonc' },
                     settings = {
