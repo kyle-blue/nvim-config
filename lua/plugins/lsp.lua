@@ -197,6 +197,8 @@ return {
 
                 terraform = {},
 
+                bashls = {},
+
                 jsonls = {
                     filetypes = { 'json', 'jsonc' },
                     settings = {
