@@ -44,6 +44,9 @@ return {
             vim.keymap.set('n', '<leader>sF', function()
                 builtin.find_files { hidden = true, no_ignore = true }
             end, { desc = '[S]earch [F]iles and show ignored / hidden' })
+            vim.keymap.set('n', '<leader>sG', function()
+                builtin.live_grep { additional_args = { '--hidden', '-u' } }
+            end, { desc = '[S]earch by [G]rep and show ignored / hidden' })
             vim.keymap.set('n', '<leader>ss', builtin.builtin, { desc = '[S]earch [S]elect Telescope' })
             vim.keymap.set('n', '<leader>sw', builtin.grep_string, { desc = '[S]earch current [W]ord' })
             vim.keymap.set('n', '<leader>sg', builtin.live_grep, { desc = '[S]earch by [G]rep' })
