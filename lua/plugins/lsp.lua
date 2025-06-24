@@ -13,6 +13,15 @@ return {
         },
     },
     {
+        'towolf/vim-helm',
+        dependencies = {
+            'neovim/nvim-lspconfig',
+            'williamboman/mason.nvim',
+            'williamboman/mason-lspconfig.nvim',
+        },
+        config = function() end,
+    },
+    {
         -- Main LSP Configuration (built in neovim lsp manager)
         'neovim/nvim-lspconfig',
         dependencies = {

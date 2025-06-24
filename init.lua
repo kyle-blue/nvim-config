@@ -24,6 +24,7 @@ package.path = package.path .. ';' .. get_current_file_dir() .. '?.lua'
 require 'base_config'
 require 'nvim-project-configuration'
 require 'custom.run_file_on_save'
+require 'custom.remove_from_qf'
 
 -- [[ Install `lazy.nvim` plugin manager ]]
 local lazypath = vim.fn.stdpath 'data' .. '/lazy/lazy.nvim'
