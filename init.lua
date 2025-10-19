@@ -23,8 +23,16 @@ package.path = package.path .. ';' .. get_current_file_dir() .. '?.lua'
 
 require 'base_config'
 require 'nvim-project-configuration'
-require 'custom.run_file_on_save'
 require 'custom.remove_from_qf'
+
+if vim.g.vscode or os.getenv("VSCODE_PID") then
+    print("Loading vscode config...")
+    require 'vscode_init'
+    print("done!")
+else
+    print("Loading regular config...")
+    require 'custom.run_file_on_save'
+end
 
 -- [[ Install `lazy.nvim` plugin manager ]]
 local lazypath = vim.fn.stdpath 'data' .. '/lazy/lazy.nvim'

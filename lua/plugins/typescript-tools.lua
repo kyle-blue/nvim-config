@@ -1,5 +1,9 @@
 -- Better typescript lsp support (includes styled-components)
 
+if vim.g.vscode then
+    return {}
+end
+
 return {
     {
         'pmizio/typescript-tools.nvim',

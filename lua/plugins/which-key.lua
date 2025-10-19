@@ -1,5 +1,9 @@
 -- Useful plugin to show you pending keybinds.
 
+if vim.g.vscode then
+    return {}
+end
+
 return {
     {
         'folke/which-key.nvim',
@@ -42,7 +46,7 @@ return {
 
             -- Document existing key chains
             spec = {
-                { '<leader>c', group = '[C]ode', mode = { 'n', 'x' } },
+                { '<leader>c', group = '[C]ode',     mode = { 'n', 'x' } },
                 { '<leader>d', group = '[D]ocument' },
                 { '<leader>r', group = '[R]ename' },
                 { '<leader>s', group = '[S]earch' },

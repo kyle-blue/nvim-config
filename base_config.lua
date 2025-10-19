@@ -71,6 +71,8 @@ vim.opt.scrolloff = 10
 -- See `:help 'confirm'`
 vim.opt.confirm = true
 
+vim.o.sessionoptions = 'blank,buffers,curdir,folds,help,tabpages,winsize,winpos,terminal,localoptions'
+
 -- [[ Basic Keymaps ]]
 --  See `:help vim.keymap.set()`
 

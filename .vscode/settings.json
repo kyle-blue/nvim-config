@@ -1,0 +1,11 @@
+{
+    "Lua.workspace.library": [
+        "/usr/share/nvim/runtime/lua",
+        "${3rd}/luv/library"
+    ],
+    "Lua.runtime.version": "LuaJIT",
+    "Lua.workspace.checkThirdParty": false,
+    "Lua.diagnostics.globals": ["vim", "require"],
+    "Lua.hint.enable": true,
+    "Lua.completion.callSnippet": "Replace"
+}

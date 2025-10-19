@@ -1,4 +1,7 @@
 -- Autoformatter that makes use of formatters installed by Mason
+if vim.g.vscode then
+    return {}
+end
 
 return {
     {

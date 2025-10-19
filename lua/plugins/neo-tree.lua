@@ -1,5 +1,9 @@
 -- Plugin to show project file structure in a separate panel
---
+
+if vim.g.vscode then
+    return {}
+end
+
 return {
     {
         'nvim-neo-tree/neo-tree.nvim',
