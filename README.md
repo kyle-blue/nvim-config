@@ -3,6 +3,7 @@
 ## Pre-requisites
 
 - Ripgrep must be installed: `sudo apt install ripgrep`
+- Luarocks is recommended (not yet required, but may be in future for some packages). See [here for install instructions](https://luarocks.org/)
 - Nerd font must be installed:
   - Run: `git clone --depth=1 https://github.com/ryanoasis/nerd-fonts`
   - Run: `cd nerd-fonts && ./install.sh Hack`
@@ -10,18 +11,13 @@
 - Most recent (unstable) version of nvim must be installed:
   - Run: `sudo add-apt-repository ppa:neovim-ppa/unstable && sudo apt update && sudo apt install neovim`
 - Clone this repository into your nvim config directory, which is usually `~/.config/nvim`
+
+## Language support
+
 - For styled components linting run: `npm i -g @styled/typescript-styled-plugin typescript-styled-plugin`
 - Install Go for golang (gopls) language server
 - Templ CLI (which includes LSP)
 - Install tailwindcss lsp: `npm install -g @tailwindcss/language-server`
-
-## Notable keybinds
-
-- `<leader>f` - format current buffer
-- (In visual select) `S<any key>` - surround selection in provided key (useful for surrounding in braces, quotes or HTML tags)
-- `\` - Open neotree
-- (While in neotree) `?` - Show available commands
-- `gc<movement>` - Toggle comment for that movement
 
 ## Recommended workflow
 
@@ -34,13 +30,7 @@ set-option -g focus-events on
 set-option -sg escape-time 10
 set-option -a terminal-features 'xterm-256color:RGB'
 set -g status-style bg=#003052
+setw -g mode-keys vi
 ```
 
-You should see no tmux related errors when running :healthcheck
-
-## Todos
-
-- Add keybinds enum file
-- Change diagnostics formatting on qflist and location list?
-- Add some insert mode keybinds e.g. delete recent word (instead of having to first go into normal mode, also useful for rename refactor)
-- Get lua treesitter next function working
+You should see no tmux related errors when running :checkhealth
