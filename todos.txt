@@ -1,0 +1,20 @@
+## THINGS I WANT
+
+- Insert mode: alt backspace removes a word (also in <space>rn window)
+- More refactoring options then just rename
+- Surround: "saiw"
+
+## CORE THINGS
+
+DONE - General core settings (e.g. spaces instead of tabs, 4 spaces etc)
+- Package manager (lazy)
+- File browser (oil)
+- Linting, LSP manager and autocomplete
+- Page scroll visualiser
+- Git diff viewer
+- Files and grep search (telescope)
+- Showcase available commands
+
+### Potential additions
+
+keybinds enum file (so keybinds are easy to remap)

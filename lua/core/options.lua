@@ -2,6 +2,7 @@ local opt = vim.opt
 
 -- Global Settings
 vim.g.mapleader = " "
+vim.g.maplocalleader = " "
 
 -- UI & Appearance
 opt.laststatus = 3 -- one status bar no matter how many windows

@@ -1,4 +1,23 @@
-.luarc.json
-nvim
-lazy-lock.json
-todos.txt
+# --- Vim/Neovim Temporary Files ---
+*.swp
+*.bak
+*.tmp
+*~
+undo/
+
+# --- History and Sessions ---
+.netrwhist
+Session.vim
+Sessionx.vim
+
+# --- Compiled Spell Files ---
+spell/*.spl
+spell/*.sug
+
+# --- OS Specific Files ---
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
