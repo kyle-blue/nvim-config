@@ -7,7 +7,8 @@
 ## CORE THINGS
 
 DONE - General core settings (e.g. spaces instead of tabs, 4 spaces etc)
-- Package manager (lazy)
+DONE - Package manager (lazy)
+- The big 3 - Treesitter, mason (lsp manager), telescopmason (lsp manager), telescopee
 - File browser (oil)
 - Linting, LSP manager and autocomplete
 - Page scroll visualiser

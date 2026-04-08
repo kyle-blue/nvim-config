@@ -26,7 +26,7 @@ opt.smartindent = true
 opt.expandtab = true
 opt.wrap = false
 -- This is commonly overriden in opt_local by built in file-type plugins, so we also override this in autocmds.lua
-opt.formatoptions:remove({"r", "o"}) -- Stop comments auto starting on new line
+opt.formatoptions:remove({ "r", "o" }) -- Stop comments auto starting on new line
 
 -- Completion
 opt.pumheight = 10
@@ -51,7 +51,7 @@ opt.undofile = true
 local swap_dir = os.getenv("HOME") .. "/.local/share/nvim/swap"
 
 if vim.fn.isdirectory(swap_dir) == 0 then
-    vim.fn.mkdir(swap_dir, "p")
+	vim.fn.mkdir(swap_dir, "p")
 end
 
 opt.directory = swap_dir .. "//"
