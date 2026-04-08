@@ -8,7 +8,14 @@
   - Run: `git clone --depth=1 https://github.com/ryanoasis/nerd-fonts`
   - Run: `cd nerd-fonts && ./install.sh Hack`
   - Modify your terminal window to make use of "Hack Nerd Font"
-- Most recent (unstable) version of nvim must be installed:
+- Most recent stable version of nvim must be installed (replace 0.12.1 with latest version):
+```bash
+curl -LO https://github.com/neovim/neovim/releases/download/v0.12.1/nvim-linux-x86_64.tar.gz
+sudo rm -rf /opt/nvim /opt/nvim-linux-x86_64
+sudo tar -C /opt -xzf nvim-linux-x86_64.tar.gz
+sudo ln -sf /opt/nvim-linux-x86_64/bin/nvim /usr/local/bin/nvim
+rm nvim-linux-x86_64.tar.gz
+```
   - Run: `sudo add-apt-repository ppa:neovim-ppa/unstable && sudo apt update && sudo apt install neovim`
 - Clone this repository into your nvim config directory, which is usually `~/.config/nvim`
 
