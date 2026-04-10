@@ -14,7 +14,7 @@ DONE - Linting, LSP manager and autocomplete
 - Page scroll visualiser
 DONE - Git diff viewer
 DONE - Files and grep search (telescope)
-- Showcase available commands
+DONE - Showcase available commands
 
 ### Potential additions
 
