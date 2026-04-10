@@ -11,7 +11,7 @@ DONE - Package manager (lazy)
 DONE (mostly, need to go through some things) - The big 3 - Treesitter, mason (lsp manager), telescope (went with snacks.picker)
 - File browser (oil)
 DONE - Linting, LSP manager and autocomplete
-- Page scroll visualiser
+DONE - Page scroll visualiser
 DONE - Git diff viewer
 DONE - Files and grep search (telescope)
 DONE - Showcase available commands
