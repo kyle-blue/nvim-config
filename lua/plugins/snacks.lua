@@ -38,6 +38,42 @@ return {
 		picker = { enabled = true },
 		notifier = { enabled = true },
 		words = { enabled = true },
+		input = {
+			enabled = true,
+			win = {
+				keys = {
+					-- Custom functionality to make sure alt backspace deletes a word in this menu also
+					["<M-BS>"] = {
+						function()
+							local line = vim.api.nvim_get_current_line()
+							local col = vim.api.nvim_win_get_cursor(0)[2] -- 0-indexed column
+
+							if col == 0 then
+								return
+							end
+
+							local before = line:sub(1, col)
+							local after = line:sub(col + 1)
+
+							-- 1. If we are currently on a separator, delete all contiguous separators
+							local new_before = before:gsub("[%s%-_]+$", "")
+
+							-- 2. If the line didn't change (we weren't on a separator),
+							--    delete all contiguous non-separator characters (the "word")
+							if new_before == before then
+								new_before = before:gsub("[^%s%-_]+$", "")
+							end
+
+							-- 3. Update the line and move the cursor to the end of the new prefix
+							vim.api.nvim_set_current_line(new_before .. after)
+							vim.api.nvim_win_set_cursor(0, { 1, #new_before })
+						end,
+						mode = "i",
+						desc = "Delete word backward (custom logic)",
+					},
+				},
+			},
+		},
 	},
 	keys = {
 		{

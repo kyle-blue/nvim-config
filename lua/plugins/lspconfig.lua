@@ -86,6 +86,9 @@ return {
 						Snacks.picker.lsp_workspace_symbols()
 					end, "[W]orkspace [S]ymbols")
 
+					map("<leader>rn", vim.lsp.buf.rename, "[R]e[n]ame Symbol")
+					map("<leader>ra", vim.lsp.buf.code_action, "[R]efactor [A]ctions", { "n", "x" })
+
 					-- Inlay Hints
 					if
 						client and client:supports_method(vim.lsp.protocol.Methods.textDocument_inlayHint, event.buf)
