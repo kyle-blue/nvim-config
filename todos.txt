@@ -1,7 +1,15 @@
+## AI
+
+- Add CodeCompanion
+
+### Future
+
+- AI multi agent workflow (may require custom plugin)
+
 ## THINGS I WANT
 
-- Insert mode: alt backspace removes a word (also in <space>rn window)
-- More refactoring options then just rename
+DONE - Insert mode: alt backspace removes a word (also in <space>rn window)
+DONE - More refactoring options then just rename
 DONE - Surround: "saiw"
 
 ## CORE THINGS
