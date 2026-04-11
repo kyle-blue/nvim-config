@@ -2,20 +2,16 @@
 
 - Insert mode: alt backspace removes a word (also in <space>rn window)
 - More refactoring options then just rename
-- Surround: "saiw"
+DONE - Surround: "saiw"
 
 ## CORE THINGS
 
 DONE - General core settings (e.g. spaces instead of tabs, 4 spaces etc)
 DONE - Package manager (lazy)
 DONE (mostly, need to go through some things) - The big 3 - Treesitter, mason (lsp manager), telescope (went with snacks.picker)
-- File browser (oil)
+DONE - File browser (oil)
 DONE - Linting, LSP manager and autocomplete
 DONE - Page scroll visualiser
 DONE - Git diff viewer
 DONE - Files and grep search (telescope)
 DONE - Showcase available commands
-
-### Potential additions
-
-keybinds enum file (so keybinds are easy to remap)
