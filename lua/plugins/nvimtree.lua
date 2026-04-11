@@ -3,11 +3,12 @@ return {
 	version = "*",
 	lazy = false,
 	dependencies = {
-		{ "nvim-mini/mini.icons", opts = {} },
+		{ "nvim-tree/nvim-web-devicons", opts = {} },
 	},
 
 	keys = {
 		{ "\\", "<Cmd>NvimTreeToggle<CR>", desc = "Toggle NvimTree" },
+		-- Also <leader>tr to reset to cwd root (tree root). Config below
 	},
 
 	config = function()
@@ -35,6 +36,32 @@ return {
 				noremap = true,
 				silent = true,
 			})
+
+			vim.keymap.set("n", "<leader>tr", function()
+				print(vim.fn.getcwd())
+				api.tree.change_root(vim.fn.getcwd())
+				api.tree.reload()
+			end, {
+				desc = "Reset Root to CWD",
+				buffer = bufnr,
+				noremap = true,
+				silent = true,
+			})
+
+			vim.keymap.set("n", "<leader>sr", function()
+				local node = api.tree.get_node_under_cursor()
+				if not node then
+					return
+				end
+
+				-- If it's a file, get its parent folder; if it's a folder, use it directly
+				local path = node.type == "directory" and node.absolute_path
+					or vim.fn.fnamemodify(node.absolute_path, ":h")
+
+				vim.api.nvim_set_current_dir(path)
+				api.tree.change_root(path)
+				print("New CWD: " .. path)
+			end, { desc = "Set CWD to Cursor Node", buffer = bufnr })
 		end
 
 		-- Initialize nvim-tree with the custom on_attach
@@ -43,6 +70,13 @@ return {
 			hijack_netrw = false,
 			disable_netrw = false,
 
+			-- Fix needed to prevent nvim-tree messing with vim root dir
+			actions = {
+				change_dir = {
+					enable = false,
+					global = false,
+				},
+			},
 			view = {
 				width = 30,
 				side = "left",
