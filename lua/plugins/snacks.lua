@@ -90,6 +90,13 @@ return {
 			end,
 			desc = "Search Grep",
 		},
+		{
+			"<leader>sG",
+			function()
+				Snacks.picker.files({ hidden = true, ignored = true })
+			end,
+			desc = "Search All Files (hidden + gitignored)",
+		},
 
 		-- Workspace Diagnostics Picker (<leader
 		{

@@ -48,7 +48,16 @@ return {
 				silent = true,
 			})
 
-			vim.keymap.set("n", "<leader>sr", function()
+			vim.keymap.set("n", "<leader>.", function()
+				api.tree.toggle_hidden_filter()
+			end, {
+				desc = "Toggle Hidden Files",
+				buffer = bufnr,
+				noremap = true,
+				silent = true,
+			})
+
+		vim.keymap.set("n", "<leader>sr", function()
 				local node = api.tree.get_node_under_cursor()
 				if not node then
 					return
