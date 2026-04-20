@@ -16,3 +16,12 @@ keymap.set("v", "K", ":m '<-2<CR>gv=gv", { desc = "Move selection up" })
 
 vim.keymap.set("n", "<leader>q", vim.diagnostic.setloclist, { desc = "Open diagnostic [Q]uickfix list" })
 vim.keymap.set("i", "<M-BS>", "<C-w>", { desc = "Delete word backward" })
+
+-- Clipboard
+vim.keymap.set("n", "<leader>cp", function()
+	vim.fn.setreg("+", vim.fn.expand("%"))
+end, { desc = "Copy relative file path" })
+
+vim.keymap.set("n", "<leader>cP", function()
+	vim.fn.setreg("+", vim.fn.expand("%:p"))
+end, { desc = "Copy absolute file path" })
