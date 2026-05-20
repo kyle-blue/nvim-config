@@ -114,7 +114,7 @@ end
 end
 
 -- ── Tree renderer ─────────────────────────────────────────────────────────────
--- dir_open: { abs_path = false } means collapsed; nil/missing = expanded.
+-- dir_open: { abs_path = true } means expanded; nil/missing = collapsed (default).
 
 local function render_tree(root, origin_status, accept_status, dir_open)
 local lines = {}
@@ -137,7 +137,7 @@ for i, child in ipairs(children) do
 local last = (i == #children)
 local connector = last and "└ " or "├ "
 local child_pfx = pfx .. (last and "  " or "│ ")
-local is_open = child.is_dir and (dir_open[child.abs_path] ~= false)
+local is_open = child.is_dir and (dir_open[child.abs_path] == true)
 local icon = child.is_dir and (is_open and "▾ " or "▸ ") or ""
 local text = pfx .. connector .. icon .. child.name .. (child.is_dir and "/" or "")
 
@@ -276,9 +276,9 @@ return
 end
 if node.is_dir then
 local dir_open = get_dir_open()
--- nil = open (default) → collapse; false = collapsed → re-open
-dir_open[node.abs_path] = (dir_open[node.abs_path] == false) and nil or false
-vim.schedule(M.refresh)
+-- nil = collapsed (default); true = expanded
+dir_open[node.abs_path] = (dir_open[node.abs_path] == true) and nil or true
+M.refresh()
 else
 open_file_in_editor(node.abs_path)
 end
@@ -322,15 +322,12 @@ local panel_h = math.max(4, math.floor(total * 0.25))
 local origin_buf = make_panel_buf("origin")
 local accept_buf = make_panel_buf("accept")
 
--- ── Origin panel (split within tree_win's column) ────────────────────────
-local origin_win
--- nvim_open_win with win= is the correct Neovim 0.10+ way to create a
--- split that is guaranteed to stay inside a specific window's column.
+-- Create both splits without heights first; Neovim distributes equally by
+-- default. We then set explicit heights to get reliable 50/25/25 ratios.
 local ok1, err1 = pcall(function()
 origin_win = vim.api.nvim_open_win(origin_buf, false, {
 win = tree_win,
 split = "below",
-height = panel_h,
 })
 end)
 if not ok1 then
@@ -338,13 +335,6 @@ vim.notify("git_compare_sidebar: nvim_open_win failed: " .. tostring(err1), vim.
 return
 end
 
--- Resize the tree to its target height now that there is space below it.
-pcall(vim.api.nvim_win_set_height, tree_win, tree_h)
-setup_panel_win(origin_win)
-state.origin_win = origin_win
-state.origin_buf = origin_buf
-
--- ── Accept panel (split within origin_win's column) ──────────────────────
 local accept_win
 local ok2, err2 = pcall(function()
 accept_win = vim.api.nvim_open_win(accept_buf, false, {
@@ -356,6 +346,16 @@ if not ok2 then
 vim.notify("git_compare_sidebar: nvim_open_win failed: " .. tostring(err2), vim.log.levels.WARN)
 return
 end
+
+-- Set all three heights now that both splits exist.
+-- winfixheight (applied in setup_panel_win) will lock the panel heights.
+vim.api.nvim_win_set_height(tree_win, tree_h)
+vim.api.nvim_win_set_height(origin_win, panel_h)
+-- accept_win gets the remaining space (≈ panel_h)
+
+setup_panel_win(origin_win)
+state.origin_win = origin_win
+state.origin_buf = origin_buf
 
 setup_panel_win(accept_win)
 state.accept_win = accept_win
