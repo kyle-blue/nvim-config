@@ -8,6 +8,13 @@ return {
 	---@module 'blink.cmp'
 	---@type blink.cmp.Config
 	opts = {
+		signature = {
+			enabled = true,
+			window = {
+				border = "rounded",
+			},
+		},
+
 		completion = {
 			list = {
 				selection = {
@@ -37,7 +44,7 @@ return {
 		keymap = {
 			preset = "default",
 			["<Tab>"] = { "select_and_accept", "fallback" },
-			["<C-space>"] = { "show", "show_documentation", "hide_documentation" },
+			["<C-space>"] = { "show_signature", "show", "show_documentation", "hide_documentation" },
 		},
 	},
 }
