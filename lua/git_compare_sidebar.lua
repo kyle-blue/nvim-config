@@ -21,6 +21,20 @@ local M = {}
 
 local sidebar_ns = vim.api.nvim_create_namespace("git_compare_sidebar")
 
+-- Maps row hl group → tint suffix for combined stat+bg highlight groups.
+local HL_TINT_SUFFIX = {
+GitCompareOriginNew      = "OriginNew",
+GitCompareOriginModified = "OriginModified",
+GitCompareAcceptNew      = "AcceptNew",
+GitCompareAcceptModified = "AcceptModified",
+}
+
+local function stat_hl(stat_type, row_hl)
+local suffix = HL_TINT_SUFFIX[row_hl]
+if suffix then return "GitCompareStat" .. stat_type .. suffix end
+return "GitCompareStat" .. stat_type
+end
+
 local state = {
 origin_win = nil,
 origin_buf = nil,
@@ -188,13 +202,13 @@ local vt = {}
 if commit then
 if child.is_dir then
 local s = gc().get_dir_stat(commit, child.abs_path)
-if s.added > 0 then table.insert(vt, { " +" .. s.added, "GitCompareStatAdd" }) end
-if s.deleted > 0 then table.insert(vt, { " -" .. s.deleted, "GitCompareStatDel" }) end
-if s.changed > 0 then table.insert(vt, { " ~" .. s.changed, "GitCompareStatChg" }) end
+if s.added > 0 then table.insert(vt, { " +" .. s.added, stat_hl("Add", hl) }) end
+if s.deleted > 0 then table.insert(vt, { " -" .. s.deleted, stat_hl("Del", hl) }) end
+if s.changed > 0 then table.insert(vt, { " ~" .. s.changed, stat_hl("Chg", hl) }) end
 else
 local s = gc().get_file_stat(commit, child.abs_path)
-if s.added > 0 then table.insert(vt, { " +" .. s.added, "GitCompareStatAdd" }) end
-if s.removed > 0 then table.insert(vt, { " -" .. s.removed, "GitCompareStatDel" }) end
+if s.added > 0 then table.insert(vt, { " +" .. s.added, stat_hl("Add", hl) }) end
+if s.removed > 0 then table.insert(vt, { " -" .. s.removed, stat_hl("Del", hl) }) end
 end
 end
 
@@ -256,9 +270,6 @@ if e.line_hl then opts.line_hl_group = e.line_hl end
 if e.vt then
 opts.virt_text = e.vt
 opts.virt_text_pos = "eol"
--- "combine" layers the stat fg on top of the line_hl_group bg
--- instead of reverting to Normal bg.
-opts.virt_text_hl_mode = "combine"
 end
 pcall(vim.api.nvim_buf_set_extmark, bufnr, sidebar_ns, e.lnum_0 + HEADER_LINES, 0, opts)
 end
@@ -352,7 +363,7 @@ end
 vim.cmd("edit " .. vim.fn.fnameescape(path))
 end
 
-local function attach_keymaps(bufnr, get_node_data, get_dir_open)
+local function attach_keymaps(bufnr, panel_type, get_node_data, get_dir_open)
 local function on_activate()
 local lnum = vim.api.nvim_win_get_cursor(0)[1]
 local node = get_node_data()[lnum]
@@ -378,9 +389,8 @@ local opts = { buffer = bufnr, noremap = true, silent = true }
 vim.keymap.set("n", "<CR>", on_activate, opts)
 vim.keymap.set("n", "o", on_activate, opts)
 
--- Auto-skip the header line: if cursor lands on line 1 AND the panel has
--- content (line count > 1), jump down to line 2.  When the panel is empty
--- (only the header), leave the cursor alone so the window stays navigable.
+-- Track cursor position continuously so it can be restored after tree reopen.
+-- Also enforces the header-skip rule (cursor must not rest on line 1).
 vim.api.nvim_create_autocmd({ "CursorMoved", "WinEnter" }, {
 buffer = bufnr,
 callback = function()
@@ -388,7 +398,9 @@ if vim.api.nvim_buf_line_count(bufnr) > 1 then
 local row = vim.api.nvim_win_get_cursor(0)[1]
 if row == 1 then
 vim.api.nvim_win_set_cursor(0, { 2, 0 })
+row = 2
 end
+_saved_left_pos = { win_type = panel_type, lnum = row }
 end
 end,
 })
@@ -397,16 +409,6 @@ end
 -- ── Window management ─────────────────────────────────────────────────────────
 
 function M.close_panels()
--- Save where the user was so we can restore it on next open.
-if _last_left_win and vim.api.nvim_win_is_valid(_last_left_win) then
-local wt = win_type(_last_left_win)
-if wt then
-_saved_left_pos = {
-win_type = wt,
-lnum = vim.api.nvim_win_get_cursor(_last_left_win)[1],
-}
-end
-end
 for _, k in ipairs({ "origin_win", "accept_win" }) do
 if state[k] and vim.api.nvim_win_is_valid(state[k]) then
 pcall(vim.api.nvim_win_close, state[k], true)
@@ -417,7 +419,7 @@ state.origin_buf = nil
 state.accept_buf = nil
 state.origin_node_data = {}
 state.accept_node_data = {}
--- Forget the last left window; it will be re-set on the next WinEnter.
+-- _saved_left_pos is intentionally kept so the next open can restore it.
 _last_left_win = nil
 end
 
@@ -483,11 +485,13 @@ state.accept_buf = accept_buf
 
 attach_keymaps(
 origin_buf,
+"origin",
 function() return state.origin_node_data end,
 function() return state.origin_dir_open end
 )
 attach_keymaps(
 accept_buf,
+"accept",
 function() return state.accept_node_data end,
 function() return state.accept_dir_open end
 )
@@ -508,12 +512,16 @@ elseif pos.win_type == "nvimtree" then
 target_win = find_tree_win()
 end
 if not target_win then return end
-local line_count = target_buf and vim.api.nvim_buf_line_count(target_buf) or vim.api.nvim_buf_line_count(vim.api.nvim_win_get_buf(target_win))
+local buf_to_count = target_buf or vim.api.nvim_win_get_buf(target_win)
+local line_count = vim.api.nvim_buf_line_count(buf_to_count)
 local lnum = math.min(pos.lnum, math.max(1, line_count))
--- For panel buffers skip line 1 (header).
 if target_buf and lnum < HEADER_LINES + 1 then lnum = HEADER_LINES + 1 end
 pcall(vim.api.nvim_win_set_cursor, target_win, { lnum, 0 })
 _last_left_win = target_win
+-- Move focus to the restored window (origin/accept panels, not nvim-tree).
+if pos.win_type == "origin" or pos.win_type == "accept" then
+pcall(vim.api.nvim_set_current_win, target_win)
+end
 end)
 end
 
@@ -542,6 +550,16 @@ local win = vim.api.nvim_get_current_win()
 local ft = vim.bo[vim.api.nvim_win_get_buf(win)].filetype
 if ft == "NvimTree" or ft == "git_compare_panel" then
 _last_left_win = win
+end
+end,
+})
+-- Track nvim-tree cursor position for restoration on reopen.
+vim.api.nvim_create_autocmd("CursorMoved", {
+group = augroup,
+callback = function()
+local win = vim.api.nvim_get_current_win()
+if vim.bo[vim.api.nvim_win_get_buf(win)].filetype == "NvimTree" then
+_saved_left_pos = { win_type = "nvimtree", lnum = vim.api.nvim_win_get_cursor(win)[1] }
 end
 end,
 })

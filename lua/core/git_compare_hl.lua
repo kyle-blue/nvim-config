@@ -38,6 +38,23 @@ local function define_hl_groups()
 	vim.api.nvim_set_hl(0, "GitCompareStatAdd", { fg = "#00ff44" })
 	vim.api.nvim_set_hl(0, "GitCompareStatDel", { fg = "#ff3333" })
 	vim.api.nvim_set_hl(0, "GitCompareStatChg", { fg = "#ff9900" })
+
+	-- Per-tint variants of stat groups so virt_text always carries the row's bg.
+	-- Standard virt_text renders with the hl group's own bg (Normal if unset).
+	-- By baking the row bg into each combined group we avoid that fallback.
+	local stat_defs = { { "Add", "#00ff44" }, { "Del", "#ff3333" }, { "Chg", "#ff9900" } }
+	local tint_bgs = {
+		{ "OriginNew",      "#192e19" },
+		{ "OriginModified", "#321900" },
+		{ "AcceptNew",      "#1f4020" },
+		{ "AcceptModified", "#4a2500" },
+	}
+	for _, s in ipairs(stat_defs) do
+		for _, t in ipairs(tint_bgs) do
+			vim.api.nvim_set_hl(0, "GitCompareStat" .. s[1] .. t[1], { fg = s[2], bg = t[2] })
+		end
+	end
+
 	-- Sidebar panel header: blue background, bright foreground, bold.
 	vim.api.nvim_set_hl(0, "GitComparePanelHeader", { bg = "#003070", fg = "#e8e8ff", bold = true })
 	-- Sidebar directory name: bold only (inherits fg/bg from the row highlight).
@@ -175,6 +192,21 @@ end
 
 local tree_ns = vim.api.nvim_create_namespace("git_compare_tree_hl")
 
+-- Maps a row hl group name to the tint suffix used in combined stat groups.
+-- e.g. "GitCompareOriginNew" → "OriginNew", used as "GitCompareStatAdd" .. suffix.
+local HL_TINT_SUFFIX = {
+	GitCompareOriginNew      = "OriginNew",
+	GitCompareOriginModified = "OriginModified",
+	GitCompareAcceptNew      = "AcceptNew",
+	GitCompareAcceptModified = "AcceptModified",
+}
+
+local function stat_hl(stat_type, row_hl)
+	local suffix = HL_TINT_SUFFIX[row_hl]
+	if suffix then return "GitCompareStat" .. stat_type .. suffix end
+	return "GitCompareStat" .. stat_type
+end
+
 local function setup_tree_hl()
 	local ok_api, tree_api = pcall(require, "nvim-tree.api")
 	if not ok_api then
@@ -259,27 +291,23 @@ local function setup_tree_hl()
 			if stat_commit then
 				if is_dir then
 					local s = gc.get_dir_stat(stat_commit, abs_path)
-					if s.added > 0 then table.insert(vt, { " +" .. s.added, "GitCompareStatAdd" }) end
-					if s.deleted > 0 then table.insert(vt, { " -" .. s.deleted, "GitCompareStatDel" }) end
-					if s.changed > 0 then table.insert(vt, { " ~" .. s.changed, "GitCompareStatChg" }) end
+					if s.added > 0 then table.insert(vt, { " +" .. s.added, stat_hl("Add", hl) }) end
+					if s.deleted > 0 then table.insert(vt, { " -" .. s.deleted, stat_hl("Del", hl) }) end
+					if s.changed > 0 then table.insert(vt, { " ~" .. s.changed, stat_hl("Chg", hl) }) end
 				else
 					local s = gc.get_file_stat(stat_commit, abs_path)
-					if s.added > 0 then table.insert(vt, { " +" .. s.added, "GitCompareStatAdd" }) end
-					if s.removed > 0 then table.insert(vt, { " -" .. s.removed, "GitCompareStatDel" }) end
+					if s.added > 0 then table.insert(vt, { " +" .. s.added, stat_hl("Add", hl) }) end
+					if s.removed > 0 then table.insert(vt, { " -" .. s.removed, stat_hl("Del", hl) }) end
 				end
 			end
 
-			-- Combine background highlight and virt_text into ONE extmark so the
-			-- virtual text is rendered on top of the row tint (not on Normal bg).
+			-- Single extmark carries both bg and virt_text.
 			if hl or #vt > 0 then
 				local opts = {}
 				if hl then opts.line_hl_group = hl end
 				if #vt > 0 then
 					opts.virt_text = vt
 					opts.virt_text_pos = "eol"
-					-- "combine" layers the stat fg on top of the line_hl_group bg
-					-- instead of replacing it with Normal bg.
-					opts.virt_text_hl_mode = "combine"
 				end
 				pcall(vim.api.nvim_buf_set_extmark, bufnr, tree_ns, line_1 - 1, 0, opts)
 			end
