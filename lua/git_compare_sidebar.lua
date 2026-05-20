@@ -320,51 +320,78 @@ end
 
 -- ── Public refresh ────────────────────────────────────────────────────────────
 
+-- Hash for change detection (lightweight, no JSON).
+local function fl_hash(fl, dir_open_state)
+	local keys = {}
+	for k in pairs(fl.new)      do table.insert(keys, "n:" .. k) end
+	for k in pairs(fl.modified) do table.insert(keys, "m:" .. k) end
+	table.sort(keys)
+	local open_keys = {}
+	for k, v in pairs(dir_open_state) do if v then table.insert(open_keys, k) end end
+	table.sort(open_keys)
+	return table.concat(keys, "|") .. "||" .. table.concat(open_keys, "|")
+end
+
+local _sidebar_hash = { origin = "", accept = "" }
+local _refresh_timer = nil
+
 function M.refresh()
-local any = (state.origin_buf and vim.api.nvim_buf_is_valid(state.origin_buf))
-or (state.accept_buf and vim.api.nvim_buf_is_valid(state.accept_buf))
-if not any then
-return
-end
+	local any = (state.origin_buf and vim.api.nvim_buf_is_valid(state.origin_buf))
+		or (state.accept_buf and vim.api.nvim_buf_is_valid(state.accept_buf))
+	if not any then return end
 
-local gc = require("git_compare")
-local git_root = gc.git_root()
-if not git_root then
-return
-end
+	local uv = vim.uv or vim.loop
+	if _refresh_timer then
+		pcall(function() _refresh_timer:stop(); _refresh_timer:close() end)
+		_refresh_timer = nil
+	end
+	_refresh_timer = uv.new_timer()
+	_refresh_timer:start(200, 0, vim.schedule_wrap(function()
+		_refresh_timer = nil
 
-local origin_commit = gc.get_origin_commit()
-local accept_commit = gc.get_accepted_commit()
-local origin_fl = gc.get_changed_file_list(origin_commit)
-local accept_fl = gc.get_changed_file_list(accept_commit)
-local origin_status = gc.get_file_status(origin_commit)
-local accept_status = gc.get_file_status(accept_commit)
+		local gc = require("git_compare")
+		local git_root = gc.git_root()
+		if not git_root then return end
 
-if state.origin_buf and vim.api.nvim_buf_is_valid(state.origin_buf) then
-local paths = collect_paths(origin_fl)
-local tree = build_path_tree(paths, git_root)
-local lines, extmarks, node_data, bold_names =
-render_tree(tree, origin_status, accept_status, state.origin_dir_open, origin_commit)
-write_panel(state.origin_buf, " Origin Changes", lines, extmarks, bold_names)
-state.origin_node_data = {}
-for lnum, d in pairs(node_data) do
-state.origin_node_data[lnum + HEADER_LINES] = d
-end
-end
+		local origin_commit = gc.get_origin_commit()
+		local accept_commit = gc.get_accepted_commit()
+		local origin_fl     = gc.get_changed_file_list(origin_commit)
+		local accept_fl     = gc.get_changed_file_list(accept_commit)
+		local origin_status = gc.get_file_status(origin_commit)
+		local accept_status = gc.get_file_status(accept_commit)
 
-if state.accept_buf and vim.api.nvim_buf_is_valid(state.accept_buf) then
-local paths = collect_paths(accept_fl)
-local tree = build_path_tree(paths, git_root)
-local lines, extmarks, node_data, bold_names =
-render_tree(tree, origin_status, accept_status, state.accept_dir_open, accept_commit)
-write_panel(state.accept_buf, " Accept Changes", lines, extmarks, bold_names)
-state.accept_node_data = {}
-for lnum, d in pairs(node_data) do
-state.accept_node_data[lnum + HEADER_LINES] = d
-end
-end
-end
+		local new_origin_hash = fl_hash(origin_fl, state.origin_dir_open)
+		local new_accept_hash = fl_hash(accept_fl,  state.accept_dir_open)
 
+		if state.origin_buf and vim.api.nvim_buf_is_valid(state.origin_buf)
+				and new_origin_hash ~= _sidebar_hash.origin then
+			_sidebar_hash.origin = new_origin_hash
+			local paths = collect_paths(origin_fl)
+			local tree  = build_path_tree(paths, git_root)
+			local lines, extmarks, node_data, bold_names =
+				render_tree(tree, origin_status, accept_status, state.origin_dir_open, origin_commit)
+			write_panel(state.origin_buf, " Origin Changes", lines, extmarks, bold_names)
+			state.origin_node_data = {}
+			for lnum, d in pairs(node_data) do
+				state.origin_node_data[lnum + HEADER_LINES] = d
+			end
+		end
+
+		if state.accept_buf and vim.api.nvim_buf_is_valid(state.accept_buf)
+				and new_accept_hash ~= _sidebar_hash.accept then
+			_sidebar_hash.accept = new_accept_hash
+			local paths = collect_paths(accept_fl)
+			local tree  = build_path_tree(paths, git_root)
+			local lines, extmarks, node_data, bold_names =
+				render_tree(tree, origin_status, accept_status, state.accept_dir_open, accept_commit)
+			write_panel(state.accept_buf, " Accept Changes", lines, extmarks, bold_names)
+			state.accept_node_data = {}
+			for lnum, d in pairs(node_data) do
+				state.accept_node_data[lnum + HEADER_LINES] = d
+			end
+		end
+	end))
+end
 -- ── Keymaps ───────────────────────────────────────────────────────────────────
 
 local function open_file_in_editor(path)

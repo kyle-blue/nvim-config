@@ -1,51 +1,38 @@
 -- core/git_compare_hl.lua
--- Sets up buffer-level line highlighting, tree row highlighting, and user
--- commands for the two-baseline git comparison system.
--- Called from core/autocmds.lua after plugins load.
+-- Buffer-level and nvim-tree row highlighting for the two-baseline git comparison system.
 --
--- Highlight layers (background tints, full line width):
---   Origin baseline  (merge-base with upstream)  – muted bg tint
---   Accepted baseline (:Accept commit)           – more vivid bg tint
---
--- Commands:
---   :Accept     – pins the current HEAD as the "accepted" baseline
---   :AcceptDiff – opens CodeDiff between current state and the accepted baseline
+-- Performance design:
+--   • All git I/O is async (via git_compare.warm_async).  No vim.fn.system() here.
+--   • apply_buf_hl() calls warm_line_hunks_async → never blocks the main thread.
+--   • A single debounced schedule_refresh() (400 ms) collapses all event triggers
+--     into one pass; prevents redundant re-renders when multiple events fire together.
+--   • Only buffers visible in a window are repainted (not every loaded buffer).
+--   • Per-buffer hash guards: highlights are not reapplied if nothing changed.
+--   • Signcolumn for nvim-tree is set once on TreeOpen, not on every render.
 
 local M = {}
 
--- Highlight group definitions ------------------------------------------------
--- All highlights use background colours so text colour is preserved.
+-- ── Highlight group definitions ──────────────────────────────────────────────
 
 local function define_hl_groups()
-	-- Tree row backgrounds (full-width, applied via line_hl_group extmarks after
-	-- each TreeRendered event – see setup_tree_hl below).
-	-- Origin baseline: muted tint
-	vim.api.nvim_set_hl(0, "GitCompareOriginNew", { bg = "#192e19" })
+	vim.api.nvim_set_hl(0, "GitCompareOriginNew",      { bg = "#192e19" })
 	vim.api.nvim_set_hl(0, "GitCompareOriginModified", { bg = "#321900" })
-	-- Accepted baseline: more vivid tint
-	vim.api.nvim_set_hl(0, "GitCompareAcceptNew", { bg = "#1f4020" })
+	vim.api.nvim_set_hl(0, "GitCompareAcceptNew",      { bg = "#1f4020" })
 	vim.api.nvim_set_hl(0, "GitCompareAcceptModified", { bg = "#4a2500" })
 
-	-- Buffer line backgrounds (full-width via line_hl_group extmarks).
-	-- Origin layer: very subtle
-	vim.api.nvim_set_hl(0, "GitCompareBufOriginNew", { bg = "#121e12" })
+	vim.api.nvim_set_hl(0, "GitCompareBufOriginNew",      { bg = "#121e12" })
 	vim.api.nvim_set_hl(0, "GitCompareBufOriginModified", { bg = "#241200" })
-	-- Accepted layer: slightly stronger
-	vim.api.nvim_set_hl(0, "GitCompareBufAcceptNew", { bg = "#182c18" })
+	vim.api.nvim_set_hl(0, "GitCompareBufAcceptNew",      { bg = "#182c18" })
 	vim.api.nvim_set_hl(0, "GitCompareBufAcceptModified", { bg = "#361a00" })
 
-	-- Diff stat virtual text colours (bright, no bold so they don't overpower names).
 	vim.api.nvim_set_hl(0, "GitCompareStatAdd", { fg = "#00ff44" })
 	vim.api.nvim_set_hl(0, "GitCompareStatDel", { fg = "#ff3333" })
 	vim.api.nvim_set_hl(0, "GitCompareStatChg", { fg = "#ff9900" })
 
-	-- Per-tint variants of stat groups so virt_text always carries the row's bg.
 	local stat_defs = { { "Add", "#00ff44" }, { "Del", "#ff3333" }, { "Chg", "#ff9900" } }
-	local tint_bgs = {
-		{ "OriginNew",      "#192e19" },
-		{ "OriginModified", "#321900" },
-		{ "AcceptNew",      "#1f4020" },
-		{ "AcceptModified", "#4a2500" },
+	local tint_bgs  = {
+		{ "OriginNew",      "#192e19" }, { "OriginModified", "#321900" },
+		{ "AcceptNew",      "#1f4020" }, { "AcceptModified", "#4a2500" },
 	}
 	for _, s in ipairs(stat_defs) do
 		for _, t in ipairs(tint_bgs) do
@@ -53,97 +40,62 @@ local function define_hl_groups()
 		end
 	end
 
-	-- Accept-tier gutter bars for tree/sidebar: explicit fg+bg so the sign column
-	-- inherits the correct row tint (sign_hl_group does NOT inherit line_hl_group bg).
-	vim.api.nvim_set_hl(0, "GitCompareAcceptNewSign",      { fg = "#00ffaa", bg = "#1f4020" })
-	vim.api.nvim_set_hl(0, "GitCompareAcceptModifiedSign", { fg = "#ffaa00", bg = "#4a2500" })
-	-- Buffer variants: bright fg only — user does not want coloured gutter bg in
-	-- main buffers. The ▌ bar is still visible via its fg colour.
+	vim.api.nvim_set_hl(0, "GitCompareAcceptNewSign",         { fg = "#00ffaa", bg = "#1f4020" })
+	vim.api.nvim_set_hl(0, "GitCompareAcceptModifiedSign",    { fg = "#ffaa00", bg = "#4a2500" })
 	vim.api.nvim_set_hl(0, "GitCompareBufAcceptNewSign",      { fg = "#00ffaa" })
 	vim.api.nvim_set_hl(0, "GitCompareBufAcceptModifiedSign", { fg = "#ffaa00" })
 
-	-- Sidebar panel header: blue background, bright foreground, bold.
 	vim.api.nvim_set_hl(0, "GitComparePanelHeader", { bg = "#003070", fg = "#e8e8ff", bold = true })
-	-- Sidebar directory name: bold only (inherits fg/bg from the row highlight).
 	vim.api.nvim_set_hl(0, "GitComparePanelFolder", { bold = true })
 
-	-- Make nvim-tree folder names bold (read → modify → write to preserve fg/bg).
-	for _, grp in ipairs({
-		"NvimTreeFolderName",
-		"NvimTreeOpenedFolderName",
-		"NvimTreeEmptyFolderName",
-	}) do
+	for _, grp in ipairs({ "NvimTreeFolderName", "NvimTreeOpenedFolderName", "NvimTreeEmptyFolderName" }) do
 		local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = grp, link = false })
-		if ok then
-			hl.bold = true
-			pcall(vim.api.nvim_set_hl, 0, grp, hl)
-		end
+		if ok then hl.bold = true; pcall(vim.api.nvim_set_hl, 0, grp, hl) end
 	end
 end
 
--- Buffer highlighting --------------------------------------------------------
+-- ── Buffer highlighting ───────────────────────────────────────────────────────
 
 local ns = vim.api.nvim_create_namespace("git_compare_hl")
 
--- Per-buffer cache: skip clear+reapply if highlights haven't changed.
--- Key: bufnr → "gen:origin_flag:accept_flag:linecount"
--- Bumped whenever gc.invalidate_* is called (gen changes) or line count changes.
-local _buf_hl_cache = {}
+local _buf_hl_cache = {}  -- bufnr → hash string
 
 local function buf_hl_hash(bufnr, filepath, gen, origin_status, accept_status)
-	local of = origin_status.new[filepath] and "on"
-		or origin_status.modified[filepath] and "om"
-		or ""
+	local of = origin_status.new[filepath] and "on" or origin_status.modified[filepath] and "om" or ""
 	local af = (accept_status and accept_status.new[filepath]) and "an"
-		or (accept_status and accept_status.modified[filepath]) and "am"
-		or ""
+		or (accept_status and accept_status.modified[filepath]) and "am" or ""
 	return gen .. ":" .. of .. ":" .. af .. ":" .. vim.api.nvim_buf_line_count(bufnr)
 end
 
--- Apply all-line highlight for a file that is entirely new (untracked or added).
 local function hl_all_lines(bufnr, hl_group, priority, sign_hl)
 	local count = vim.api.nvim_buf_line_count(bufnr)
 	for lnum = 0, count - 1 do
 		local opts = { line_hl_group = hl_group, priority = priority }
-		if sign_hl then
-			opts.sign_text = "▌"
-			opts.sign_hl_group = sign_hl
-		end
+		if sign_hl then opts.sign_text = "▌"; opts.sign_hl_group = sign_hl end
 		pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, lnum, 0, opts)
 	end
 end
 
-local function apply_buf_hl(bufnr)
-	if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
-		return
-	end
-	if vim.bo[bufnr].buftype ~= "" then
-		return
-	end
+-- Apply buffer highlights from cache.  Never calls git directly.
+-- Must be called after warm_async has completed.
+local function apply_buf_hl_from_cache(bufnr)
+	if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then return end
+	if vim.bo[bufnr].buftype ~= "" then return end
 	local filepath = vim.api.nvim_buf_get_name(bufnr)
-	if filepath == "" then
-		return
-	end
+	if filepath == "" then return end
 
 	local gc = require("git_compare")
-	local origin = gc.get_origin_commit()
+	local origin   = gc.get_origin_commit()
 	local accepted = gc.get_accepted_commit()
 	local origin_status = gc.get_file_status(origin)
 	local accept_status = gc.get_file_status(accepted)
 
-	-- Skip clear+reapply entirely if nothing has changed since last apply.
-	-- This eliminates the two-frame flash caused by clear → render → apply.
 	local hash = buf_hl_hash(bufnr, filepath, gc.get_invalidation_gen(), origin_status, accept_status)
-	if _buf_hl_cache[bufnr] == hash then
-		return
-	end
+	if _buf_hl_cache[bufnr] == hash then return end
 	_buf_hl_cache[bufnr] = hash
 
 	vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
 
-	-- Origin layer – priority 10.
-	-- If the file is entirely new (untracked or added since origin), highlight every
-	-- line green.  Otherwise fall back to hunk-level diff highlighting.
 	if origin then
 		if origin_status.new[filepath] then
 			hl_all_lines(bufnr, "GitCompareBufOriginNew", 10)
@@ -151,30 +103,23 @@ local function apply_buf_hl(bufnr)
 			for _, hunk in ipairs(gc.get_line_hunks(origin, filepath)) do
 				local hl = hunk.kind == "new" and "GitCompareBufOriginNew" or "GitCompareBufOriginModified"
 				for _, lnum in ipairs(hunk.lines) do
-					pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, lnum - 1, 0, {
-						line_hl_group = hl,
-						priority = 10,
-					})
+					pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, lnum - 1, 0, { line_hl_group = hl, priority = 10 })
 				end
 			end
 		end
 	end
 
-	-- Accepted layer – priority 20 (wins over origin).
-	-- Also adds a ▌ gutter bar (accept-tier only) so the two tiers are visually distinct.
 	if accepted then
 		if accept_status.new[filepath] then
 			hl_all_lines(bufnr, "GitCompareBufAcceptNew", 20, "GitCompareBufAcceptNewSign")
 		else
 			for _, hunk in ipairs(gc.get_line_hunks(accepted, filepath)) do
-				local hl = hunk.kind == "new" and "GitCompareBufAcceptNew" or "GitCompareBufAcceptModified"
+				local hl      = hunk.kind == "new" and "GitCompareBufAcceptNew"         or "GitCompareBufAcceptModified"
 				local sign_hl = hunk.kind == "new" and "GitCompareBufAcceptNewSign" or "GitCompareBufAcceptModifiedSign"
 				for _, lnum in ipairs(hunk.lines) do
 					pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, lnum - 1, 0, {
-						line_hl_group = hl,
-						priority = 20,
-						sign_text = "▌",
-						sign_hl_group = sign_hl,
+						line_hl_group = hl, priority = 20,
+						sign_text = "▌", sign_hl_group = sign_hl,
 					})
 				end
 			end
@@ -182,96 +127,143 @@ local function apply_buf_hl(bufnr)
 	end
 end
 
-local function refresh_all_bufs()
-	for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-		if vim.api.nvim_buf_is_loaded(bufnr) then
+-- Public entry-point used by git_compare.lua's get_line_hunks() lazy-load.
+function M.apply_buf(bufnr)
+	apply_buf_hl_from_cache(bufnr)
+end
+
+-- Warms line-hunks for the current file then applies highlights.
+-- Completely non-blocking.
+local function apply_buf_hl(bufnr)
+	if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then return end
+	if vim.bo[bufnr].buftype ~= "" then return end
+	local filepath = vim.api.nvim_buf_get_name(bufnr)
+	if filepath == "" then return end
+
+	local gc = require("git_compare")
+	local origin   = gc.get_origin_commit()
+	local accepted = gc.get_accepted_commit()
+
+	-- Fast path: hash tells us nothing has changed.
+	local origin_status = gc.get_file_status(origin)
+	local accept_status = gc.get_file_status(accepted)
+	local hash = buf_hl_hash(bufnr, filepath, gc.get_invalidation_gen(), origin_status, accept_status)
+	if _buf_hl_cache[bufnr] == hash then return end
+
+	-- Need hunks for modified files – warm async, apply when ready.
+	local remaining = 0
+	local function done() remaining = remaining - 1; if remaining == 0 then apply_buf_hl_from_cache(bufnr) end end
+
+	if origin and not origin_status.new[filepath] then
+		remaining = remaining + 1
+		gc.warm_line_hunks_async(origin, filepath, done)
+	end
+	if accepted and not accept_status.new[filepath] then
+		remaining = remaining + 1
+		gc.warm_line_hunks_async(accepted, filepath, done)
+	end
+	if remaining == 0 then
+		apply_buf_hl_from_cache(bufnr)
+	end
+end
+
+-- Only refresh buffers that are currently visible in some window.
+local function refresh_visible_bufs()
+	local seen = {}
+	for _, win in ipairs(vim.api.nvim_list_wins()) do
+		local bufnr = vim.api.nvim_win_get_buf(win)
+		if not seen[bufnr] then
+			seen[bufnr] = true
 			apply_buf_hl(bufnr)
 		end
 	end
 end
 
-local function reload_tree()
-	local ok, api = pcall(require, "nvim-tree.api")
-	if ok then
-		pcall(api.tree.reload)
+-- ── Debounced refresh coordinator ────────────────────────────────────────────
+-- All event callbacks funnel here.  Debounced at 400 ms so rapid consecutive
+-- events (save → watcher → focus) collapse into a single refresh pass.
+
+local _refresh_timer = nil
+
+local function schedule_refresh(invalidate_fn)
+	local uv = vim.uv or vim.loop
+	if _refresh_timer then
+		pcall(function() _refresh_timer:stop(); _refresh_timer:close() end)
+		_refresh_timer = nil
 	end
+	if invalidate_fn then invalidate_fn() end
+	_refresh_timer = uv.new_timer()
+	_refresh_timer:start(400, 0, vim.schedule_wrap(function()
+		_refresh_timer = nil
+		local gc = require("git_compare")
+		gc.warm_async(function()
+			refresh_visible_bufs()
+			-- Reload the tree (triggers TreeRendered which reapplies extmarks).
+			local ok, api = pcall(require, "nvim-tree.api")
+			if ok then pcall(api.tree.reload) end
+			pcall(function() require("git_compare_sidebar").refresh() end)
+		end)
+	end))
 end
 
--- Tree row highlighting ------------------------------------------------------
--- After every TreeRendered event we walk the visible node list in the same DFS
--- order as the renderer and apply a line_hl_group extmark for each entry that
--- has a git-compare status.  line_hl_group fills the FULL ROW background (to
--- the window's right edge) – the decorator API cannot do this.
+-- ── nvim-tree row highlighting ────────────────────────────────────────────────
 
 local tree_ns = vim.api.nvim_create_namespace("git_compare_tree_hl")
 
--- Maps a row hl group name to the tint suffix used in combined stat groups.
--- e.g. "GitCompareOriginNew" → "OriginNew", used as "GitCompareStatAdd" .. suffix.
 local HL_TINT_SUFFIX = {
-	GitCompareOriginNew      = "OriginNew",
-	GitCompareOriginModified = "OriginModified",
-	GitCompareAcceptNew      = "AcceptNew",
-	GitCompareAcceptModified = "AcceptModified",
+	GitCompareOriginNew      = "OriginNew",  GitCompareOriginModified = "OriginModified",
+	GitCompareAcceptNew      = "AcceptNew",  GitCompareAcceptModified = "AcceptModified",
 }
-
 local function stat_hl(stat_type, row_hl)
 	local suffix = HL_TINT_SUFFIX[row_hl]
-	if suffix then return "GitCompareStat" .. stat_type .. suffix end
-	return "GitCompareStat" .. stat_type
+	return suffix and ("GitCompareStat" .. stat_type .. suffix) or ("GitCompareStat" .. stat_type)
 end
 
 local function setup_tree_hl()
 	local ok_api, tree_api = pcall(require, "nvim-tree.api")
-	if not ok_api then
-		return
-	end
+	if not ok_api then return end
 
-	-- Ask nvim-tree's internal core module for the first data line (1-based).
-	-- Falls back to 2 (root label on line 1, nodes start on line 2).
 	local function first_node_line()
 		local ok, core = pcall(require, "nvim-tree.core")
-		if ok and core.get_nodes_starting_line then
-			return core.get_nodes_starting_line()
-		end
+		if ok and core.get_nodes_starting_line then return core.get_nodes_starting_line() end
 		return 2
 	end
 
-	-- Walk visible nodes in render order, building {[line_1based] = {path, is_dir}}.
-	-- Mirrors the Iterator used inside Explorer:get_nodes_by_line().
 	local function build_line_map()
 		local root = tree_api.tree.get_nodes()
-		if not root or not root.nodes then
-			return {}
-		end
-
+		if not root or not root.nodes then return {} end
 		local line = first_node_line()
 		local map = {}
-
 		local function walk(nodes)
 			for _, node in ipairs(nodes) do
 				if not node.hidden then
-					map[line] = {
-						path = node.absolute_path,
-						is_dir = (node.type == "directory") or (node.nodes ~= nil),
-					}
+					map[line] = { path = node.absolute_path, is_dir = (node.type == "directory") or (node.nodes ~= nil) }
 					line = line + 1
-					-- Recurse into expanded directories.
-					if node.nodes and node.open and #node.nodes > 0 then
-						walk(node.nodes)
-					end
+					if node.nodes and node.open and #node.nodes > 0 then walk(node.nodes) end
 				end
 			end
 		end
-
 		walk(root.nodes)
 		return map
 	end
 
+	-- Set sign column once when the tree opens; not on every render.
+	tree_api.events.subscribe(tree_api.events.Event.TreeOpen, function(data)
+		vim.schedule(function()
+			local bufnr = data and data.bufnr
+			for _, win in ipairs(vim.api.nvim_list_wins()) do
+				local wbuf = vim.api.nvim_win_get_buf(win)
+				if (bufnr and wbuf == bufnr) or vim.bo[wbuf].filetype == "NvimTree" then
+					pcall(function() vim.wo[win].signcolumn = "yes:1" end)
+					break
+				end
+			end
+		end)
+	end)
+
 	tree_api.events.subscribe(tree_api.events.Event.TreeRendered, function(data)
 		local bufnr = data and data.bufnr
-		if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
-			return
-		end
+		if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then return end
 
 		vim.api.nvim_buf_clear_namespace(bufnr, tree_ns, 0, -1)
 
@@ -283,151 +275,78 @@ local function setup_tree_hl()
 
 		for line_1, entry in pairs(build_line_map()) do
 			local abs_path, is_dir = entry.path, entry.is_dir
-			local hl
-			local stat_commit
+			local hl, stat_commit
 			if accept_commit and accept_status.new[abs_path] then
-				hl = "GitCompareAcceptNew"
-				stat_commit = accept_commit
+				hl = "GitCompareAcceptNew";      stat_commit = accept_commit
 			elseif accept_commit and accept_status.modified[abs_path] then
-				hl = "GitCompareAcceptModified"
-				stat_commit = accept_commit
+				hl = "GitCompareAcceptModified"; stat_commit = accept_commit
 			elseif origin_status.new[abs_path] then
-				hl = "GitCompareOriginNew"
-				stat_commit = origin_commit
+				hl = "GitCompareOriginNew";      stat_commit = origin_commit
 			elseif origin_status.modified[abs_path] then
-				hl = "GitCompareOriginModified"
-				stat_commit = origin_commit
+				hl = "GitCompareOriginModified"; stat_commit = origin_commit
 			end
 
-			-- Build diff-stat virtual text for changed entries.
 			local vt = {}
 			if stat_commit then
 				if is_dir then
 					local s = gc.get_dir_stat(stat_commit, abs_path)
-					if s.added > 0 then table.insert(vt, { " +" .. s.added, stat_hl("Add", hl) }) end
+					if s.added   > 0 then table.insert(vt, { " +" .. s.added,   stat_hl("Add", hl) }) end
 					if s.deleted > 0 then table.insert(vt, { " -" .. s.deleted, stat_hl("Del", hl) }) end
 					if s.changed > 0 then table.insert(vt, { " ~" .. s.changed, stat_hl("Chg", hl) }) end
 				else
 					local s = gc.get_file_stat(stat_commit, abs_path)
-					if s.added > 0 then table.insert(vt, { " +" .. s.added, stat_hl("Add", hl) }) end
+					if s.added   > 0 then table.insert(vt, { " +" .. s.added,   stat_hl("Add", hl) }) end
 					if s.removed > 0 then table.insert(vt, { " -" .. s.removed, stat_hl("Del", hl) }) end
 				end
 			end
 
-			-- Single extmark carries bg, virt_text, and sign gutter (all highlighted rows
-			-- get a sign so the sign column background is always filled, not just
-			-- accept-tier rows). Accept-tier shows ▌; origin-tier shows a space bg.
 			if hl or #vt > 0 then
 				local opts = {}
 				if hl then opts.line_hl_group = hl end
-				if #vt > 0 then
-					opts.virt_text = vt
-					opts.virt_text_pos = "eol"
-				end
-				if hl == "GitCompareAcceptNew" then
-					opts.sign_text = "▌"
-					opts.sign_hl_group = "GitCompareAcceptNewSign"
-				elseif hl == "GitCompareAcceptModified" then
-					opts.sign_text = "▌"
-					opts.sign_hl_group = "GitCompareAcceptModifiedSign"
-				elseif hl == "GitCompareOriginNew" then
-					opts.sign_text = " "
-					opts.sign_hl_group = "GitCompareOriginNew"
-				elseif hl == "GitCompareOriginModified" then
-					opts.sign_text = " "
-					opts.sign_hl_group = "GitCompareOriginModified"
+				if #vt > 0 then opts.virt_text = vt; opts.virt_text_pos = "eol" end
+				if     hl == "GitCompareAcceptNew"      then opts.sign_text = "▌"; opts.sign_hl_group = "GitCompareAcceptNewSign"
+				elseif hl == "GitCompareAcceptModified" then opts.sign_text = "▌"; opts.sign_hl_group = "GitCompareAcceptModifiedSign"
+				elseif hl == "GitCompareOriginNew"      then opts.sign_text = " "; opts.sign_hl_group = "GitCompareOriginNew"
+				elseif hl == "GitCompareOriginModified" then opts.sign_text = " "; opts.sign_hl_group = "GitCompareOriginModified"
 				end
 				pcall(vim.api.nvim_buf_set_extmark, bufnr, tree_ns, line_1 - 1, 0, opts)
 			end
 		end
-
-		-- Ensure the sign column is visible in the tree window so gutter bars show.
-		for _, win in ipairs(vim.api.nvim_list_wins()) do
-			if vim.api.nvim_win_get_buf(win) == bufnr then
-				pcall(function() vim.wo[win].signcolumn = "yes:1" end)
-				break
-			end
-		end
 	end)
 end
 
--- Public setup ---------------------------------------------------------------
+-- ── File-system watcher ───────────────────────────────────────────────────────
+-- Watches .git/HEAD only (branch switches, commits).
+-- .git/index is deliberately excluded: it fires dozens of times per minute
+-- under normal usage (git read-locks) and causes constant expensive refreshes.
 
--- Debounced full-refresh used by the filesystem watcher.
-local _refresh_timer = nil
-local function debounced_refresh()
-	local uv = vim.uv or vim.loop
-	if _refresh_timer then
-		pcall(function()
-			_refresh_timer:stop()
-			_refresh_timer:close()
-		end)
-		_refresh_timer = nil
-	end
-	_refresh_timer = uv.new_timer()
-	_refresh_timer:start(
-		800,
-		0,
-		vim.schedule_wrap(function()
-			_refresh_timer = nil
-			local gc = require("git_compare")
-			gc.invalidate_all()
-			refresh_all_bufs()
-			reload_tree()
-			pcall(function()
-				require("git_compare_sidebar").refresh()
-			end)
-		end)
-	)
-end
-
--- Install a libuv file-event watcher on a single path.
-local function watch_file(path)
-	local uv = vim.uv or vim.loop
-	local w = uv.new_fs_event()
-	if not w then
-		return
-	end
-	local ok = pcall(function()
-		w:start(path, {}, function(err)
-			if not err then
-				debounced_refresh()
-			end
-		end)
-	end)
-	if not ok then
-		pcall(function()
-			w:stop()
-			w:close()
-		end)
-	end
-end
-
--- Set up a fs watcher on .git/HEAD only (branch switches, commits).
--- We deliberately skip .git/index: it changes on every git read-lock and
--- would fire dozens of times per minute under normal usage, causing constant
--- full refreshes and cursor flicker.
 local function setup_git_watchers()
 	local git_dir = vim.trim(vim.fn.system("git rev-parse --git-dir 2>/dev/null"))
-	if vim.v.shell_error ~= 0 or git_dir == "" then
-		return
-	end
-	if git_dir:sub(1, 1) ~= "/" then
-		git_dir = vim.fn.getcwd() .. "/" .. git_dir
-	end
-	watch_file(git_dir .. "/HEAD") -- fires on commit / branch checkout
+	if vim.v.shell_error ~= 0 or git_dir == "" then return end
+	if git_dir:sub(1, 1) ~= "/" then git_dir = vim.fn.getcwd() .. "/" .. git_dir end
+
+	local uv = vim.uv or vim.loop
+	local w = uv.new_fs_event()
+	if not w then return end
+	pcall(function()
+		w:start(git_dir .. "/HEAD", {}, function(err)
+			if not err then
+				vim.schedule(function()
+					schedule_refresh(function() require("git_compare").invalidate_all() end)
+				end)
+			end
+		end)
+	end)
 end
+
+-- ── Public setup ─────────────────────────────────────────────────────────────
 
 function M.setup()
 	define_hl_groups()
 
-	-- Re-apply highlight groups whenever the colorscheme changes (schedule to
-	-- let nvim-tree re-define its groups first).
 	vim.api.nvim_create_autocmd("ColorScheme", {
 		group = vim.api.nvim_create_augroup("GitCompareHLGroups", { clear = true }),
-		callback = function()
-			vim.schedule(define_hl_groups)
-		end,
+		callback = function() vim.schedule(define_hl_groups) end,
 	})
 
 	setup_tree_hl()
@@ -435,155 +354,115 @@ function M.setup()
 
 	local augroup = vim.api.nvim_create_augroup("GitCompareHL", { clear = true })
 
-	-- Highlight newly entered / loaded buffers.
+	-- New/updated buffer: warm then apply (non-blocking).
 	vim.api.nvim_create_autocmd({ "BufEnter", "BufReadPost" }, {
 		group = augroup,
 		callback = function(ev)
-			vim.schedule(function()
-				apply_buf_hl(ev.buf)
-			end)
+			local bufnr = ev.buf
+			local gc = require("git_compare")
+			-- If cache is warm just apply immediately; otherwise warm first.
+			if gc.get_origin_commit() then
+				vim.schedule(function() apply_buf_hl(bufnr) end)
+			else
+				gc.warm_async(function() apply_buf_hl(bufnr) end)
+			end
 		end,
 	})
 
-	-- After a save, invalidate just that file's cache then re-highlight.
+	-- Save: partial invalidation for this file only.
 	vim.api.nvim_create_autocmd("BufWritePost", {
 		group = augroup,
 		callback = function(ev)
 			local filepath = vim.api.nvim_buf_get_name(ev.buf)
-			require("git_compare").invalidate_file(filepath)
-			vim.schedule(function()
-				apply_buf_hl(ev.buf)
-				reload_tree()
-				pcall(function()
-					require("git_compare_sidebar").refresh()
-				end)
-			end)
+			schedule_refresh(function() require("git_compare").invalidate_file(filepath) end)
 		end,
 	})
 
-	-- When a file is changed externally (e.g. Copilot writes directly to disk).
-	vim.api.nvim_create_autocmd({ "FileChangedShellPost" }, {
+	-- External file change (e.g. Copilot writes directly to disk).
+	vim.api.nvim_create_autocmd("FileChangedShellPost", {
 		group = augroup,
 		callback = function(ev)
-			require("git_compare").invalidate_file(vim.api.nvim_buf_get_name(ev.buf))
-			vim.schedule(function()
-				apply_buf_hl(ev.buf)
-			end)
+			local filepath = vim.api.nvim_buf_get_name(ev.buf)
+			schedule_refresh(function() require("git_compare").invalidate_file(filepath) end)
 		end,
 	})
 
-	-- On focus return, drop all caches and repaint.  Limit to one full refresh
-	-- per 5 seconds to prevent rapid invalidations when switching windows.
-	local _last_focus_invalidation = 0
+	-- Focus return: full invalidation, throttled to once per 10 s.
+	local _last_focus = 0
 	vim.api.nvim_create_autocmd("FocusGained", {
 		group = augroup,
 		callback = function()
-			local now = vim.uv and vim.uv.hrtime() or vim.loop.hrtime()
-			now = now / 1e9 -- convert ns → seconds
-			if now - _last_focus_invalidation < 5 then
-				return
-			end
-			_last_focus_invalidation = now
-			vim.schedule(function()
-				require("git_compare").invalidate_all()
-				refresh_all_bufs()
-				reload_tree()
-				pcall(function()
-					require("git_compare_sidebar").refresh()
-				end)
-			end)
+			local now = (vim.uv or vim.loop).hrtime() / 1e9
+			if now - _last_focus < 10 then return end
+			_last_focus = now
+			schedule_refresh(function() require("git_compare").invalidate_all() end)
 		end,
 	})
 
-	-- For new (untracked) files: re-apply highlight as lines are added.
-	-- Debounce per-buffer at 300 ms to avoid firing on every keystroke.
-	local _text_changed_timers = {}
+	-- TextChanged/InsertLeave: only for new (untracked) files where line count matters.
+	-- Debounced per-buffer at 300 ms.
+	local _text_timers = {}
 	vim.api.nvim_create_autocmd({ "TextChanged", "InsertLeave" }, {
 		group = augroup,
 		callback = function(ev)
 			local bufnr = ev.buf
-			if vim.bo[bufnr].buftype ~= "" then
-				return
-			end
+			if vim.bo[bufnr].buftype ~= "" then return end
 			local fp = vim.api.nvim_buf_get_name(bufnr)
-			if fp == "" then
-				return
-			end
+			if fp == "" then return end
 			local gc = require("git_compare")
+			-- Quick check: only matters if the file is new (all-lines highlight depends on count).
 			local os = gc.get_file_status(gc.get_origin_commit())
-			if not os.new[fp] then
-				return
-			end
-			-- Cancel previous timer for this buffer (if any).
-			if _text_changed_timers[bufnr] then
-				pcall(function()
-					_text_changed_timers[bufnr]:stop()
-					_text_changed_timers[bufnr]:close()
-				end)
-				_text_changed_timers[bufnr] = nil
-			end
+			if not os.new[fp] then return end
 			local uv = vim.uv or vim.loop
+			if _text_timers[bufnr] then
+				pcall(function() _text_timers[bufnr]:stop(); _text_timers[bufnr]:close() end)
+			end
 			local t = uv.new_timer()
-			_text_changed_timers[bufnr] = t
+			_text_timers[bufnr] = t
 			t:start(300, 0, vim.schedule_wrap(function()
-				pcall(function()
-					t:stop()
-					t:close()
-				end)
-				_text_changed_timers[bufnr] = nil
-				-- Invalidate this file so hash changes and apply_buf_hl runs.
+				pcall(function() t:stop(); t:close() end)
+				_text_timers[bufnr] = nil
 				gc.invalidate_file(fp)
 				apply_buf_hl(bufnr)
 			end))
 		end,
 	})
 
-	-- :Accept – snapshot the CURRENT working-tree state as the accepted baseline.
-	-- Stores the snapshot under refs/nvim-accept/baseline so it:
-	--   • is never GC'd (it's a named ref)
-	--   • never appears in `git stash list` (not on refs/stash)
-	--   • automatically replaces the previous baseline on the next :Accept
+	-- :Accept – snapshot working-tree as the accepted baseline.
 	vim.api.nvim_create_user_command("Accept", function()
-		-- Delete any previous baseline ref so the old stash object can eventually GC.
 		vim.fn.system("git update-ref -d refs/nvim-accept/baseline 2>/dev/null")
-
-		-- Build a snapshot commit of the current working tree + index.
 		local stash_sha = vim.trim(vim.fn.system("git stash create 2>/dev/null"))
 		local commit
 		if vim.v.shell_error == 0 and stash_sha ~= "" then
-			-- Park the stash object under our private ref so it won't be GC'd.
 			vim.fn.system("git update-ref refs/nvim-accept/baseline " .. stash_sha)
 			commit = stash_sha
 		else
-			-- Working tree is clean; HEAD is the correct baseline.
 			commit = vim.trim(vim.fn.system("git rev-parse HEAD 2>/dev/null"))
 			if vim.v.shell_error ~= 0 or commit == "" then
-				vim.notify("Accept: not in a git repository", vim.log.levels.ERROR)
-				return
+				vim.notify("Accept: not in a git repository", vim.log.levels.ERROR); return
 			end
 			vim.fn.system("git update-ref refs/nvim-accept/baseline " .. commit)
 		end
-
 		local gc = require("git_compare")
 		gc.set_accepted_commit(commit)
-		gc.invalidate_all()
-		vim.schedule(function()
-			refresh_all_bufs()
-			reload_tree()
-			pcall(function()
-				require("git_compare_sidebar").refresh()
-			end)
-		end)
+		schedule_refresh(function() gc.invalidate_all() end)
 		vim.notify("Accepted baseline: " .. commit:sub(1, 8), vim.log.levels.INFO)
 	end, { desc = "Snapshot current working-tree state as the accepted baseline" })
+
 	vim.api.nvim_create_user_command("AcceptDiff", function()
 		local accepted = require("git_compare").get_accepted_commit()
 		if not accepted then
-			vim.notify("AcceptDiff: no accepted commit set — run :Accept first", vim.log.levels.WARN)
-			return
+			vim.notify("AcceptDiff: no accepted commit set — run :Accept first", vim.log.levels.WARN); return
 		end
 		vim.cmd("CodeDiff " .. accepted)
 	end, { desc = "Show diff between current state and accepted commit (CodeDiff)" })
+
+	-- Pre-warm the cache in the background on startup so first BufEnter is instant.
+	vim.schedule(function()
+		require("git_compare").warm_async(function()
+			refresh_visible_bufs()
+		end)
+	end)
 end
 
 return M
