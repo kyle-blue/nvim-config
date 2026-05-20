@@ -3,9 +3,10 @@ return {
 		"lukas-reineke/indent-blankline.nvim",
 		main = "ibl",
 		opts = {
-			-- Default debounce is 200ms which fires on every WinScrolled.
-			-- Increase to 500ms so indent guides only refresh after scrolling stops.
-			debounce = 500,
+			-- Increase ibl debounce from default 200ms.
+			-- ibl fires debounced_refresh on every WinScrolled; 200ms means the guides
+			-- only refresh once scroll activity stops.
+			debounce = 200,
 		},
 	},
 }
