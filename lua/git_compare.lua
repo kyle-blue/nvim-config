@@ -10,9 +10,10 @@ local _cache = {
 	origin_commit = nil,
 	origin_commit_at = 0,
 	git_root = nil,
-	file_status = {}, -- [commit_sha] = { new = {abs: true}, modified = {abs: true} }
-	file_list = {}, -- [commit_sha] = { new = {abs_path}, modified = {abs_path} } – files only, no dirs
+	file_status = {}, -- [commit_sha] = { new = {abs: true}, modified = {abs: true}, deleted = {abs: true} }
+	file_list = {}, -- [commit_sha] = { new = {}, modified = {}, deleted = {} } – files only, no dirs
 	line_hunks = {}, -- ["sha:filepath"] = [{ lines = {lnums}, kind = "new"|"modified" }]
+	diff_stats = {}, -- bulk numstat cache + per-file stat cache
 	_gen = 0, -- incremented on any invalidation; used by hl cache to detect staleness
 }
 
@@ -83,9 +84,10 @@ function M.get_file_status(commit)
 
 	-- ── Step 1: file-level diff ──────────────────────────────────────────────
 	local diff_out = vim.fn.system("git diff --name-status " .. vim.fn.shellescape(commit) .. " 2>/dev/null")
-	local status = { new = {}, modified = {} }
+	local status = { new = {}, modified = {}, deleted = {} }
 	local rel_new = {} -- relative paths only, for dir propagation
 	local rel_modified = {}
+	local rel_deleted = {}
 
 	if vim.v.shell_error == 0 then
 		for line in diff_out:gmatch("[^\n]+") do
@@ -105,6 +107,10 @@ function M.get_file_status(commit)
 					status.modified[abs] = true
 					status.modified[name] = true
 					rel_modified[name] = true
+				elseif first == "D" then
+					status.deleted[abs] = true
+					status.deleted[name] = true
+					rel_deleted[name] = true
 				end
 			end
 		end
@@ -178,6 +184,9 @@ function M.get_file_status(commit)
 	for path in pairs(rel_modified) do
 		propagate(path, "modified")
 	end
+	for path in pairs(rel_deleted) do
+		propagate(path, "modified") -- deleted file → parent dir = modified
+	end
 	for path in pairs(rel_new) do
 		propagate(path, "new")
 	end
@@ -195,7 +204,7 @@ function M.get_file_status(commit)
 	end
 
 	-- ── Step 5: build file-only list (no dirs) for the sidebar ───────────────
-	local flist = { new = {}, modified = {} }
+	local flist = { new = {}, modified = {}, deleted = {} }
 	for name in pairs(rel_new) do
 		local abs = root and (root .. "/" .. name) or name
 		flist.new[abs] = true
@@ -204,22 +213,110 @@ function M.get_file_status(commit)
 		local abs = root and (root .. "/" .. name) or name
 		flist.modified[abs] = true
 	end
+	for name in pairs(rel_deleted) do
+		local abs = root and (root .. "/" .. name) or name
+		flist.deleted[abs] = true
+	end
 
 	_cache.file_status[commit] = status
 	_cache.file_list[commit] = flist
 	return status
 end
 
--- Returns { new = {abs_path: true}, modified = {abs_path: true} } with only
--- files (no propagated directory entries).  Used by the sidebar panels.
+-- Returns { new = {abs_path: true}, modified = {abs_path: true}, deleted = {abs_path: true} }
+-- with only files (no propagated directory entries).  Used by the sidebar panels.
 function M.get_changed_file_list(commit)
 	if not commit then
-		return { new = {}, modified = {} }
+		return { new = {}, modified = {}, deleted = {} }
 	end
 	if not _cache.file_list[commit] then
 		M.get_file_status(commit) -- populates cache
 	end
-	return _cache.file_list[commit] or { new = {}, modified = {} }
+	return _cache.file_list[commit] or { new = {}, modified = {}, deleted = {} }
+end
+
+-- Run `git diff --numstat <commit>` once and cache ALL file stats together.
+-- Returns { [abs_path] = { added = N, removed = M } }.
+local function load_all_file_stats(commit)
+	local key = "all:" .. commit
+	if _cache.diff_stats[key] then
+		return _cache.diff_stats[key]
+	end
+	local root = cached_git_root()
+	local stats = {}
+	if root then
+		local out = vim.fn.system(
+			"git diff --numstat " .. vim.fn.shellescape(commit) .. " 2>/dev/null"
+		)
+		if vim.v.shell_error == 0 then
+			for line in out:gmatch("[^\n]+") do
+				local a, r, name = line:match("^(%d+)\t(%d+)\t(.+)$")
+				if a and r and name then
+					stats[root .. "/" .. name] = { added = tonumber(a), removed = tonumber(r) }
+				end
+			end
+		end
+	end
+	_cache.diff_stats[key] = stats
+	return stats
+end
+
+-- Returns { added = N, removed = M } for a single file vs <commit>.
+-- For new/untracked files, removed = 0 and added = line count.
+function M.get_file_stat(commit, abs_path)
+	if not commit or not abs_path or abs_path == "" then
+		return { added = 0, removed = 0 }
+	end
+	local key = commit .. ":stat:" .. abs_path
+	if _cache.diff_stats[key] then
+		return _cache.diff_stats[key]
+	end
+	local status = M.get_file_status(commit)
+	local stat
+	if status.new[abs_path] then
+		local ok, lines = pcall(vim.fn.readfile, abs_path)
+		stat = { added = ok and #lines or 0, removed = 0 }
+	elseif status.modified[abs_path] then
+		local all = load_all_file_stats(commit)
+		stat = all[abs_path] or { added = 0, removed = 0 }
+	else
+		stat = { added = 0, removed = 0 }
+	end
+	_cache.diff_stats[key] = stat
+	return stat
+end
+
+-- Returns { added = N, deleted = M, changed = K } counting files directly or
+-- indirectly under <abs_dir_path> that changed vs <commit>.
+function M.get_dir_stat(commit, abs_dir_path)
+	if not commit or not abs_dir_path then
+		return { added = 0, deleted = 0, changed = 0 }
+	end
+	local key = commit .. ":dirstat:" .. abs_dir_path
+	if _cache.diff_stats[key] then
+		return _cache.diff_stats[key]
+	end
+	local flist = M.get_changed_file_list(commit)
+	local prefix = abs_dir_path:gsub("/$", "") .. "/"
+	local added, deleted, changed = 0, 0, 0
+	for p in pairs(flist.new) do
+		if p:sub(1, #prefix) == prefix then
+			added = added + 1
+		end
+	end
+	for p in pairs(flist.modified) do
+		if p:sub(1, #prefix) == prefix then
+			changed = changed + 1
+		end
+	end
+	for p in pairs(flist.deleted) do
+		if p:sub(1, #prefix) == prefix then
+			deleted = deleted + 1
+		end
+	end
+	local stat = { added = added, deleted = deleted, changed = changed }
+	_cache.diff_stats[key] = stat
+	return stat
 end
 
 -- Parse `git diff` output into a list of hunks.
@@ -329,6 +426,7 @@ function M.invalidate_all()
 	_cache.file_status = {}
 	_cache.file_list = {}
 	_cache.line_hunks = {}
+	_cache.diff_stats = {}
 end
 
 -- Partial invalidation for a single file (e.g. on BufWritePost).
@@ -336,6 +434,7 @@ function M.invalidate_file(filepath)
 	_cache._gen = _cache._gen + 1
 	_cache.file_status = {} -- file sets are per-commit, easier to wipe all
 	_cache.file_list = {}
+	_cache.diff_stats = {}
 	for key in pairs(_cache.line_hunks) do
 		if filepath and key:find(filepath, 1, true) then
 			_cache.line_hunks[key] = nil

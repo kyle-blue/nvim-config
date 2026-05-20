@@ -34,6 +34,13 @@ local function define_hl_groups()
 	vim.api.nvim_set_hl(0, "GitCompareBufAcceptNew", { bg = "#182c18" })
 	vim.api.nvim_set_hl(0, "GitCompareBufAcceptModified", { bg = "#361a00" })
 
+	-- Diff stat virtual text colours (bright, bold).
+	vim.api.nvim_set_hl(0, "GitCompareStatAdd", { fg = "#00ff44", bold = true })
+	vim.api.nvim_set_hl(0, "GitCompareStatDel", { fg = "#ff3333", bold = true })
+	vim.api.nvim_set_hl(0, "GitCompareStatChg", { fg = "#ff9900", bold = true })
+	-- Sidebar panel header: blue background, bright foreground, bold.
+	vim.api.nvim_set_hl(0, "GitComparePanelHeader", { bg = "#003070", fg = "#e8e8ff", bold = true })
+
 	-- Make nvim-tree folder names bold (read → modify → write to preserve fg/bg).
 	for _, grp in ipairs({
 		"NvimTreeFolderName",
@@ -182,7 +189,7 @@ local function setup_tree_hl()
 		return 2
 	end
 
-	-- Walk visible nodes in render order, building {[line_1based] = abs_path}.
+	-- Walk visible nodes in render order, building {[line_1based] = {path, is_dir}}.
 	-- Mirrors the Iterator used inside Explorer:get_nodes_by_line().
 	local function build_line_map()
 		local root = tree_api.tree.get_nodes()
@@ -196,7 +203,10 @@ local function setup_tree_hl()
 		local function walk(nodes)
 			for _, node in ipairs(nodes) do
 				if not node.hidden then
-					map[line] = node.absolute_path
+					map[line] = {
+						path = node.absolute_path,
+						is_dir = (node.type == "directory") or (node.nodes ~= nil),
+					}
 					line = line + 1
 					-- Recurse into expanded directories.
 					if node.nodes and node.open and #node.nodes > 0 then
@@ -219,25 +229,64 @@ local function setup_tree_hl()
 		vim.api.nvim_buf_clear_namespace(bufnr, tree_ns, 0, -1)
 
 		local gc = require("git_compare")
-		local origin_status = gc.get_file_status(gc.get_origin_commit())
-		local accept_status = gc.get_file_status(gc.get_accepted_commit())
+		local origin_commit = gc.get_origin_commit()
+		local accept_commit = gc.get_accepted_commit()
+		local origin_status = gc.get_file_status(origin_commit)
+		local accept_status = gc.get_file_status(accept_commit)
 
-		for line_1, abs_path in pairs(build_line_map()) do
+		for line_1, entry in pairs(build_line_map()) do
+			local abs_path, is_dir = entry.path, entry.is_dir
 			local hl
-			if accept_status.new[abs_path] then
+			local stat_commit
+			if accept_commit and accept_status.new[abs_path] then
 				hl = "GitCompareAcceptNew"
-			elseif accept_status.modified[abs_path] then
+				stat_commit = accept_commit
+			elseif accept_commit and accept_status.modified[abs_path] then
 				hl = "GitCompareAcceptModified"
+				stat_commit = accept_commit
 			elseif origin_status.new[abs_path] then
 				hl = "GitCompareOriginNew"
+				stat_commit = origin_commit
 			elseif origin_status.modified[abs_path] then
 				hl = "GitCompareOriginModified"
+				stat_commit = origin_commit
 			end
 
 			if hl then
 				pcall(vim.api.nvim_buf_set_extmark, bufnr, tree_ns, line_1 - 1, 0, {
 					line_hl_group = hl,
 				})
+			end
+
+			-- Append diff stats as virtual text to the right of each changed entry.
+			if stat_commit then
+				local vt = {}
+				if is_dir then
+					local s = gc.get_dir_stat(stat_commit, abs_path)
+					if s.added > 0 then
+						table.insert(vt, { " +" .. s.added, "GitCompareStatAdd" })
+					end
+					if s.deleted > 0 then
+						table.insert(vt, { " -" .. s.deleted, "GitCompareStatDel" })
+					end
+					if s.changed > 0 then
+						table.insert(vt, { " ~" .. s.changed, "GitCompareStatChg" })
+					end
+				else
+					local s = gc.get_file_stat(stat_commit, abs_path)
+					if s.added > 0 then
+						table.insert(vt, { " +" .. s.added, "GitCompareStatAdd" })
+					end
+					if s.removed > 0 then
+						table.insert(vt, { " -" .. s.removed, "GitCompareStatDel" })
+					end
+				end
+				if #vt > 0 then
+					pcall(vim.api.nvim_buf_set_extmark, bufnr, tree_ns, line_1 - 1, 0, {
+						virt_text = vt,
+						virt_text_pos = "eol",
+					})
+				end
 			end
 		end
 	end)

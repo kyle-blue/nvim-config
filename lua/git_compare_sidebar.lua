@@ -64,7 +64,9 @@ wo.wrap = false
 wo.winfixheight = true
 wo.winfixwidth = true
 wo.statusline = " "
+-- Map StatusLine to the panel background so the separator between panels is invisible.
 wo.winhl = "Normal:NvimTreeNormal,NormalNC:NvimTreeNormalNC,EndOfBuffer:NvimTreeEndOfBuffer"
+.. ",StatusLine:NvimTreeNormal,StatusLineNC:NvimTreeNormal"
 end
 
 -- ── Path-tree builder ─────────────────────────────────────────────────────────
@@ -115,11 +117,19 @@ end
 
 -- ── Tree renderer ─────────────────────────────────────────────────────────────
 -- dir_open: { abs_path = true } means expanded; nil/missing = collapsed (default).
+-- commit: the baseline commit for this panel (used to fetch diff stats).
 
-local function render_tree(root, origin_status, accept_status, dir_open)
+local function render_tree(root, origin_status, accept_status, dir_open, commit)
 local lines = {}
 local highlights = {}
+local virt_texts = {} -- { lnum_0, vt = [{text,hl}] }
 local node_data = {} -- lnum_1based → { abs_path, is_dir }
+
+local gc_mod = nil -- lazy-load git_compare only if needed
+local function gc()
+if not gc_mod then gc_mod = require("git_compare") end
+return gc_mod
+end
 
 local function walk(node, pfx)
 local children = {}
@@ -151,6 +161,24 @@ end
 
 node_data[lnum] = { abs_path = child.abs_path, is_dir = child.is_dir }
 
+-- Diff stats as virtual text.
+if commit then
+local vt = {}
+if child.is_dir then
+local s = gc().get_dir_stat(commit, child.abs_path)
+if s.added > 0 then table.insert(vt, { " +" .. s.added, "GitCompareStatAdd" }) end
+if s.deleted > 0 then table.insert(vt, { " -" .. s.deleted, "GitCompareStatDel" }) end
+if s.changed > 0 then table.insert(vt, { " ~" .. s.changed, "GitCompareStatChg" }) end
+else
+local s = gc().get_file_stat(commit, child.abs_path)
+if s.added > 0 then table.insert(vt, { " +" .. s.added, "GitCompareStatAdd" }) end
+if s.removed > 0 then table.insert(vt, { " -" .. s.removed, "GitCompareStatDel" }) end
+end
+if #vt > 0 then
+table.insert(virt_texts, { lnum_0 = lnum - 1, vt = vt })
+end
+end
+
 if child.is_dir and is_open and next(child.children) then
 walk(child, child_pfx)
 end
@@ -158,17 +186,18 @@ end
 end
 
 walk(root, "")
-return lines, highlights, node_data
+return lines, highlights, node_data, virt_texts
 end
 
 -- ── Panel writer ──────────────────────────────────────────────────────────────
 
-local function write_panel(bufnr, header, lines, highlights, offset)
+local HEADER_LINES = 1 -- just the title line; no separator line below it
+
+local function write_panel(bufnr, header, lines, highlights, virt_texts)
 if not (bufnr and vim.api.nvim_buf_is_valid(bufnr)) then
 return
 end
-local sep = string.rep("─", 28)
-local content = { header, sep }
+local content = { header }
 for _, l in ipairs(lines) do
 table.insert(content, l)
 end
@@ -178,9 +207,24 @@ pcall(vim.api.nvim_buf_set_lines, bufnr, 0, -1, false, content)
 vim.bo[bufnr].modifiable = false
 
 vim.api.nvim_buf_clear_namespace(bufnr, sidebar_ns, 0, -1)
+
+-- Header: blue background highlight across the full width.
+pcall(vim.api.nvim_buf_set_extmark, bufnr, sidebar_ns, 0, 0, {
+line_hl_group = "GitComparePanelHeader",
+})
+
+-- Tree node background highlights (offset by HEADER_LINES).
 for _, h in ipairs(highlights) do
-pcall(vim.api.nvim_buf_set_extmark, bufnr, sidebar_ns, h.lnum_0 + offset, 0, {
+pcall(vim.api.nvim_buf_set_extmark, bufnr, sidebar_ns, h.lnum_0 + HEADER_LINES, 0, {
 line_hl_group = h.hl,
+})
+end
+
+-- Tree node diff-stat virtual text (offset by HEADER_LINES).
+for _, v in ipairs(virt_texts) do
+pcall(vim.api.nvim_buf_set_extmark, bufnr, sidebar_ns, v.lnum_0 + HEADER_LINES, 0, {
+virt_text = v.vt,
+virt_text_pos = "eol",
 })
 end
 end
@@ -227,14 +271,12 @@ local accept_fl = gc.get_changed_file_list(accept_commit)
 local origin_status = gc.get_file_status(origin_commit)
 local accept_status = gc.get_file_status(accept_commit)
 
-local HEADER_LINES = 2
-
 if state.origin_buf and vim.api.nvim_buf_is_valid(state.origin_buf) then
 local paths = collect_paths(origin_fl)
 local tree = build_path_tree(paths, git_root)
-local lines, hls, node_data =
-render_tree(tree, origin_status, accept_status, state.origin_dir_open)
-write_panel(state.origin_buf, " Origin Changes", lines, hls, HEADER_LINES)
+local lines, hls, node_data, virt_texts =
+render_tree(tree, origin_status, accept_status, state.origin_dir_open, origin_commit)
+write_panel(state.origin_buf, " Origin Changes", lines, hls, virt_texts)
 state.origin_node_data = {}
 for lnum, d in pairs(node_data) do
 state.origin_node_data[lnum + HEADER_LINES] = d
@@ -244,9 +286,9 @@ end
 if state.accept_buf and vim.api.nvim_buf_is_valid(state.accept_buf) then
 local paths = collect_paths(accept_fl)
 local tree = build_path_tree(paths, git_root)
-local lines, hls, node_data =
-render_tree(tree, origin_status, accept_status, state.accept_dir_open)
-write_panel(state.accept_buf, " Accept Changes", lines, hls, HEADER_LINES)
+local lines, hls, node_data, virt_texts =
+render_tree(tree, origin_status, accept_status, state.accept_dir_open, accept_commit)
+write_panel(state.accept_buf, " Accept Changes", lines, hls, virt_texts)
 state.accept_node_data = {}
 for lnum, d in pairs(node_data) do
 state.accept_node_data[lnum + HEADER_LINES] = d
@@ -276,8 +318,13 @@ return
 end
 if node.is_dir then
 local dir_open = get_dir_open()
--- nil = collapsed (default); true = expanded
-dir_open[node.abs_path] = (dir_open[node.abs_path] == true) and nil or true
+-- Explicit if/else because `and nil or true` silently fails when the
+-- "true branch" value is nil (Lua ternary pitfall).
+if dir_open[node.abs_path] == true then
+dir_open[node.abs_path] = nil -- collapse
+else
+dir_open[node.abs_path] = true -- expand
+end
 M.refresh()
 else
 open_file_in_editor(node.abs_path)
@@ -317,7 +364,10 @@ M.close_panels()
 
 local total = vim.api.nvim_win_get_height(tree_win)
 local tree_h = math.max(8, math.floor(total * 0.50))
-local panel_h = math.max(4, math.floor(total * 0.25))
+local bottom_h = math.max(6, total - tree_h)
+-- Origin gets 7/12 of the bottom half, accept gets the remaining 5/12.
+local origin_h = math.max(3, math.floor(bottom_h * 7 / 12))
+-- accept_h is the remainder (set implicitly after origin_h is locked)
 
 local origin_buf = make_panel_buf("origin")
 local accept_buf = make_panel_buf("accept")
@@ -350,8 +400,8 @@ end
 -- Set all three heights now that both splits exist.
 -- winfixheight (applied in setup_panel_win) will lock the panel heights.
 vim.api.nvim_win_set_height(tree_win, tree_h)
-vim.api.nvim_win_set_height(origin_win, panel_h)
--- accept_win gets the remaining space (≈ panel_h)
+vim.api.nvim_win_set_height(origin_win, origin_h)
+-- accept_win gets the remaining space (≈ bottom_h - origin_h)
 
 setup_panel_win(origin_win)
 state.origin_win = origin_win
