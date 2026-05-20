@@ -95,6 +95,7 @@ return {
 				dotfiles = false,
 				git_ignored = false,
 			},
+			renderer = {},
 		})
 	end,
 }

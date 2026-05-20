@@ -14,3 +14,14 @@ vim.api.nvim_create_autocmd("TextYankPost", {
 		vim.highlight.on_yank()
 	end,
 })
+
+-- Bootstrap git-compare highlighting after all plugins have loaded.
+vim.api.nvim_create_autocmd("VimEnter", {
+	once = true,
+	callback = function()
+		vim.schedule(function()
+			require("core.git_compare_hl").setup()
+			require("git_compare_sidebar").setup()
+		end)
+	end,
+})
