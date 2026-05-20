@@ -29,6 +29,9 @@ GitCompareAcceptNew      = "AcceptNew",
 GitCompareAcceptModified = "AcceptModified",
 }
 
+local folder_icon_closed = vim.g.have_nerd_font and " " or "📁 "
+local folder_icon_open   = vim.g.have_nerd_font and " " or "📂 "
+
 local function stat_hl(stat_type, row_hl)
 local suffix = HL_TINT_SUFFIX[row_hl]
 if suffix then return "GitCompareStat" .. stat_type .. suffix end
@@ -186,7 +189,7 @@ local last = (i == #children)
 local connector = last and "└ " or "├ "
 local child_pfx = pfx .. (last and "  " or "│ ")
 local is_open = child.is_dir and (dir_open[child.abs_path] == true)
-local icon = child.is_dir and (is_open and "▾ " or "▸ ") or ""
+local icon = child.is_dir and (is_open and "▾ " .. folder_icon_open or "▸ " .. folder_icon_closed) or ""
 local text = pfx .. connector .. icon .. child.name .. (child.is_dir and "/" or "")
 
 table.insert(lines, text)
@@ -221,7 +224,7 @@ vt = #vt > 0 and vt or nil,
 end
 
 -- Bold range for the directory name (byte offsets of child.name in the line).
--- connector = "└ "/"├ " (4 bytes each), icon = "▾ "/"▸ " (4 bytes each).
+-- connector = "└ "/"├ " (4 bytes each); icon = arrow (4 bytes) + folder glyph.
 if child.is_dir then
 local col_s = #pfx + #connector + #icon
 local col_e = col_s + #child.name
