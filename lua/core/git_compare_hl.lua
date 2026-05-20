@@ -58,7 +58,8 @@ end
 
 local ns = vim.api.nvim_create_namespace("git_compare_hl")
 
-local _buf_hl_cache = {}  -- bufnr → hash string
+local _buf_hl_cache  = {}  -- bufnr → hash string
+local _buf_mark_ids  = {}  -- bufnr → set of current extmark IDs (Phase 4: avoids full-scan)
 
 local function buf_hl_hash(bufnr, filepath, file_gen, origin_status, accept_status)
 	local of = origin_status.new[filepath] and "on" or origin_status.modified[filepath] and "om" or ""
@@ -70,6 +71,10 @@ end
 
 -- Apply buffer highlights from cache.  Never calls git directly.
 -- Must be called after warm_async has completed.
+-- Phase 1: uses hl_group+end_row range extmarks (O(hunks)) instead of
+--          line_hl_group per-line extmarks (O(changed_lines)).
+-- Phase 2: sign_text (▌) placed only at each range's first line.
+-- Phase 4: ID-table swap instead of nvim_buf_get_extmarks full scan.
 -- Uses set-new-then-delete-old so there is never a zero-highlight frame.
 local function apply_buf_hl_from_cache(bufnr)
 	if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then return end
@@ -87,10 +92,8 @@ local function apply_buf_hl_from_cache(bufnr)
 	if _buf_hl_cache[bufnr] == hash then return end
 	_buf_hl_cache[bufnr] = hash
 
-	-- Collect old extmark IDs before applying new ones.
-	local old_marks = vim.api.nvim_buf_get_extmarks(bufnr, ns, 0, -1, {})
-
-	-- Apply all new extmarks first (old ones remain visible in the meantime).
+	-- Phase 4: swap ID table instead of scanning Neovim's extmark B-tree.
+	local old_ids = _buf_mark_ids[bufnr] or {}
 	local new_ids = {}
 	local function set(lnum, opts)
 		local ok, id = pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, lnum, 0, opts)
@@ -99,15 +102,17 @@ local function apply_buf_hl_from_cache(bufnr)
 
 	if origin then
 		if origin_status.new[filepath] then
+			-- Phase 1: single extmark covers the entire new file.
 			local count = vim.api.nvim_buf_line_count(bufnr)
-			for lnum = 0, count - 1 do
-				set(lnum, { line_hl_group = "GitCompareBufOriginNew", priority = 10 })
-			end
+			set(0, { end_row = count, end_col = 0,
+				hl_group = "GitCompareBufOriginNew", hl_eol = true, priority = 10 })
 		else
 			for _, hunk in ipairs(gc.get_line_hunks(origin, filepath)) do
 				local hl = hunk.kind == "new" and "GitCompareBufOriginNew" or "GitCompareBufOriginModified"
-				for _, lnum in ipairs(hunk.lines) do
-					set(lnum - 1, { line_hl_group = hl, priority = 10 })
+				for _, range in ipairs(hunk.ranges) do
+					-- Phase 1: one range extmark per contiguous block of changed lines.
+					set(range.s, { end_row = range.e + 1, end_col = 0,
+						hl_group = hl, hl_eol = true, priority = 10 })
 				end
 			end
 		end
@@ -116,28 +121,33 @@ local function apply_buf_hl_from_cache(bufnr)
 	if accepted then
 		if accept_status.new[filepath] then
 			local count = vim.api.nvim_buf_line_count(bufnr)
-			for lnum = 0, count - 1 do
-				set(lnum, { line_hl_group = "GitCompareBufAcceptNew", priority = 20,
-					sign_text = "▌", sign_hl_group = "GitCompareBufAcceptNewSign" })
-			end
+			-- Phase 1: single background extmark for whole new file.
+			set(0, { end_row = count, end_col = 0,
+				hl_group = "GitCompareBufAcceptNew", hl_eol = true, priority = 20 })
+			-- Phase 2: single sign at line 0 (top of file).
+			set(0, { sign_text = "▌", sign_hl_group = "GitCompareBufAcceptNewSign", priority = 20 })
 		else
 			for _, hunk in ipairs(gc.get_line_hunks(accepted, filepath)) do
 				local hl      = hunk.kind == "new" and "GitCompareBufAcceptNew"      or "GitCompareBufAcceptModified"
 				local sign_hl = hunk.kind == "new" and "GitCompareBufAcceptNewSign"  or "GitCompareBufAcceptModifiedSign"
-				for _, lnum in ipairs(hunk.lines) do
-					set(lnum - 1, { line_hl_group = hl, priority = 20,
-						sign_text = "▌", sign_hl_group = sign_hl })
+				for _, range in ipairs(hunk.ranges) do
+					-- Phase 1: background range extmark.
+					set(range.s, { end_row = range.e + 1, end_col = 0,
+						hl_group = hl, hl_eol = true, priority = 20 })
+					-- Phase 2: sign only at the first line of each changed block.
+					set(range.s, { sign_text = "▌", sign_hl_group = sign_hl, priority = 20 })
 				end
 			end
 		end
 	end
 
-	-- Delete only the old extmarks that weren't just replaced.
-	for _, mark in ipairs(old_marks) do
-		if not new_ids[mark[1]] then
-			pcall(vim.api.nvim_buf_del_extmark, bufnr, ns, mark[1])
+	-- Phase 4: delete IDs that were not refreshed (no B-tree scan needed).
+	for id in pairs(old_ids) do
+		if not new_ids[id] then
+			pcall(vim.api.nvim_buf_del_extmark, bufnr, ns, id)
 		end
 	end
+	_buf_mark_ids[bufnr] = new_ids
 end
 
 -- Public entry-point used by git_compare.lua's get_line_hunks() lazy-load.
@@ -418,8 +428,9 @@ function M.setup()
 				else
 					for _, hunk in ipairs(gc.get_line_hunks(commit, filepath)) do
 						local t = hunk.kind == "new" and new_type or mod_type
-						for _, lnum in ipairs(hunk.lines) do
-							table.insert(marks, { line = lnum - 1, text = "▌", type = t, level = 1 })
+						-- One mark per range (at start); O(hunks) instead of O(changed_lines).
+						for _, range in ipairs(hunk.ranges) do
+							table.insert(marks, { line = range.s, text = "▌", type = t, level = 1 })
 						end
 					end
 				end
@@ -449,6 +460,16 @@ function M.setup()
 			else
 				gc.warm_async(function() apply_buf_hl(bufnr) end)
 			end
+		end,
+	})
+
+	-- Cleanup per-buffer caches when buffers are deleted.
+	vim.api.nvim_create_autocmd("BufDelete", {
+		group = augroup,
+		callback = function(ev)
+			local b = ev.buf
+			_buf_hl_cache[b] = nil
+			_buf_mark_ids[b] = nil
 		end,
 	})
 
