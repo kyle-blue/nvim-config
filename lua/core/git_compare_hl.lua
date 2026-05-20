@@ -40,8 +40,6 @@ local function define_hl_groups()
 	vim.api.nvim_set_hl(0, "GitCompareStatChg", { fg = "#ff9900" })
 
 	-- Per-tint variants of stat groups so virt_text always carries the row's bg.
-	-- Standard virt_text renders with the hl group's own bg (Normal if unset).
-	-- By baking the row bg into each combined group we avoid that fallback.
 	local stat_defs = { { "Add", "#00ff44" }, { "Del", "#ff3333" }, { "Chg", "#ff9900" } }
 	local tint_bgs = {
 		{ "OriginNew",      "#192e19" },
@@ -54,6 +52,10 @@ local function define_hl_groups()
 			vim.api.nvim_set_hl(0, "GitCompareStat" .. s[1] .. t[1], { fg = s[2], bg = t[2] })
 		end
 	end
+
+	-- Accept-tier gutter bars: brightest possible fg, visible over the bg tints.
+	vim.api.nvim_set_hl(0, "GitCompareAcceptNewSign",      { fg = "#00ffaa" })
+	vim.api.nvim_set_hl(0, "GitCompareAcceptModifiedSign", { fg = "#ffaa00" })
 
 	-- Sidebar panel header: blue background, bright foreground, bold.
 	vim.api.nvim_set_hl(0, "GitComparePanelHeader", { bg = "#003070", fg = "#e8e8ff", bold = true })
@@ -94,13 +96,15 @@ local function buf_hl_hash(bufnr, filepath, gen, origin_status, accept_status)
 end
 
 -- Apply all-line highlight for a file that is entirely new (untracked or added).
-local function hl_all_lines(bufnr, hl_group, priority)
+local function hl_all_lines(bufnr, hl_group, priority, sign_hl)
 	local count = vim.api.nvim_buf_line_count(bufnr)
 	for lnum = 0, count - 1 do
-		pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, lnum, 0, {
-			line_hl_group = hl_group,
-			priority = priority,
-		})
+		local opts = { line_hl_group = hl_group, priority = priority }
+		if sign_hl then
+			opts.sign_text = "▌"
+			opts.sign_hl_group = sign_hl
+		end
+		pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, lnum, 0, opts)
 	end
 end
 
@@ -152,16 +156,20 @@ local function apply_buf_hl(bufnr)
 	end
 
 	-- Accepted layer – priority 20 (wins over origin).
+	-- Also adds a ▌ gutter bar (accept-tier only) so the two tiers are visually distinct.
 	if accepted then
 		if accept_status.new[filepath] then
-			hl_all_lines(bufnr, "GitCompareBufAcceptNew", 20)
+			hl_all_lines(bufnr, "GitCompareBufAcceptNew", 20, "GitCompareAcceptNewSign")
 		else
 			for _, hunk in ipairs(gc.get_line_hunks(accepted, filepath)) do
 				local hl = hunk.kind == "new" and "GitCompareBufAcceptNew" or "GitCompareBufAcceptModified"
+				local sign_hl = hunk.kind == "new" and "GitCompareAcceptNewSign" or "GitCompareAcceptModifiedSign"
 				for _, lnum in ipairs(hunk.lines) do
 					pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, lnum - 1, 0, {
 						line_hl_group = hl,
 						priority = 20,
+						sign_text = "▌",
+						sign_hl_group = sign_hl,
 					})
 				end
 			end
@@ -301,7 +309,7 @@ local function setup_tree_hl()
 				end
 			end
 
-			-- Single extmark carries both bg and virt_text.
+			-- Single extmark carries bg, virt_text, and (accept-tier) sign gutter bar.
 			if hl or #vt > 0 then
 				local opts = {}
 				if hl then opts.line_hl_group = hl end
@@ -309,7 +317,23 @@ local function setup_tree_hl()
 					opts.virt_text = vt
 					opts.virt_text_pos = "eol"
 				end
+				-- Gutter bar only for the accept tier.
+				if hl == "GitCompareAcceptNew" then
+					opts.sign_text = "▌"
+					opts.sign_hl_group = "GitCompareAcceptNewSign"
+				elseif hl == "GitCompareAcceptModified" then
+					opts.sign_text = "▌"
+					opts.sign_hl_group = "GitCompareAcceptModifiedSign"
+				end
 				pcall(vim.api.nvim_buf_set_extmark, bufnr, tree_ns, line_1 - 1, 0, opts)
+			end
+		end
+
+		-- Ensure the sign column is visible in the tree window so gutter bars show.
+		for _, win in ipairs(vim.api.nvim_list_wins()) do
+			if vim.api.nvim_win_get_buf(win) == bufnr then
+				pcall(function() vim.wo[win].signcolumn = "yes:1" end)
+				break
 			end
 		end
 	end)

@@ -93,7 +93,7 @@ local function setup_panel_win(win)
 local wo = vim.wo[win]
 wo.number = false
 wo.relativenumber = false
-wo.signcolumn = "no"
+wo.signcolumn = "yes:1"
 wo.foldcolumn = "0"
 wo.wrap = false
 wo.winfixheight = true
@@ -262,14 +262,20 @@ pcall(vim.api.nvim_buf_set_extmark, bufnr, sidebar_ns, 0, 0, {
 line_hl_group = "GitComparePanelHeader",
 })
 
--- Combined background + virt_text in ONE extmark so the virtual text
--- is rendered on top of the row tint rather than on the Normal background.
+-- Combined background + virt_text; accept-tier also gets a gutter bar.
 for _, e in ipairs(extmarks) do
 local opts = {}
 if e.line_hl then opts.line_hl_group = e.line_hl end
 if e.vt then
 opts.virt_text = e.vt
 opts.virt_text_pos = "eol"
+end
+if e.line_hl == "GitCompareAcceptNew" then
+opts.sign_text = "▌"
+opts.sign_hl_group = "GitCompareAcceptNewSign"
+elseif e.line_hl == "GitCompareAcceptModified" then
+opts.sign_text = "▌"
+opts.sign_hl_group = "GitCompareAcceptModifiedSign"
 end
 pcall(vim.api.nvim_buf_set_extmark, bufnr, sidebar_ns, e.lnum_0 + HEADER_LINES, 0, opts)
 end
@@ -498,7 +504,10 @@ function() return state.accept_dir_open end
 
 vim.schedule(function()
 M.refresh()
--- After panels are populated, restore the saved left-panel position.
+-- Restore the saved left-panel position after the tree has fully settled.
+-- The nested vim.schedule gives nvim-tree one additional event-loop tick to
+-- finish its own focus management before we override it.
+vim.schedule(function()
 local pos = _saved_left_pos
 if not pos then return end
 local target_win, target_buf
@@ -518,10 +527,11 @@ local lnum = math.min(pos.lnum, math.max(1, line_count))
 if target_buf and lnum < HEADER_LINES + 1 then lnum = HEADER_LINES + 1 end
 pcall(vim.api.nvim_win_set_cursor, target_win, { lnum, 0 })
 _last_left_win = target_win
--- Move focus to the restored window (origin/accept panels, not nvim-tree).
+-- Move focus to origin/accept panels; for nvim-tree leave it where it is.
 if pos.win_type == "origin" or pos.win_type == "accept" then
 pcall(vim.api.nvim_set_current_win, target_win)
 end
+end)
 end)
 end
 
