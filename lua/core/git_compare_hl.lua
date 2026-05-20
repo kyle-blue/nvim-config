@@ -53,14 +53,14 @@ local function define_hl_groups()
 		end
 	end
 
-	-- Accept-tier gutter bars: explicit fg+bg so the sign column inherits the
-	-- correct row tint (sign_hl_group does NOT inherit line_hl_group background).
-	-- Tree / sidebar panels use the standard accept tint colours.
+	-- Accept-tier gutter bars for tree/sidebar: explicit fg+bg so the sign column
+	-- inherits the correct row tint (sign_hl_group does NOT inherit line_hl_group bg).
 	vim.api.nvim_set_hl(0, "GitCompareAcceptNewSign",      { fg = "#00ffaa", bg = "#1f4020" })
 	vim.api.nvim_set_hl(0, "GitCompareAcceptModifiedSign", { fg = "#ffaa00", bg = "#4a2500" })
-	-- Buffer variants: slightly different bg matching the buffer-level tints.
-	vim.api.nvim_set_hl(0, "GitCompareBufAcceptNewSign",      { fg = "#00ffaa", bg = "#182c18" })
-	vim.api.nvim_set_hl(0, "GitCompareBufAcceptModifiedSign", { fg = "#ffaa00", bg = "#361a00" })
+	-- Buffer variants: bright fg only — user does not want coloured gutter bg in
+	-- main buffers. The ▌ bar is still visible via its fg colour.
+	vim.api.nvim_set_hl(0, "GitCompareBufAcceptNewSign",      { fg = "#00ffaa" })
+	vim.api.nvim_set_hl(0, "GitCompareBufAcceptModifiedSign", { fg = "#ffaa00" })
 
 	-- Sidebar panel header: blue background, bright foreground, bold.
 	vim.api.nvim_set_hl(0, "GitComparePanelHeader", { bg = "#003070", fg = "#e8e8ff", bold = true })
@@ -314,7 +314,9 @@ local function setup_tree_hl()
 				end
 			end
 
-			-- Single extmark carries bg, virt_text, and (accept-tier) sign gutter bar.
+			-- Single extmark carries bg, virt_text, and sign gutter (all highlighted rows
+			-- get a sign so the sign column background is always filled, not just
+			-- accept-tier rows). Accept-tier shows ▌; origin-tier shows a space bg.
 			if hl or #vt > 0 then
 				local opts = {}
 				if hl then opts.line_hl_group = hl end
@@ -322,13 +324,18 @@ local function setup_tree_hl()
 					opts.virt_text = vt
 					opts.virt_text_pos = "eol"
 				end
-				-- Gutter bar only for the accept tier.
 				if hl == "GitCompareAcceptNew" then
 					opts.sign_text = "▌"
 					opts.sign_hl_group = "GitCompareAcceptNewSign"
 				elseif hl == "GitCompareAcceptModified" then
 					opts.sign_text = "▌"
 					opts.sign_hl_group = "GitCompareAcceptModifiedSign"
+				elseif hl == "GitCompareOriginNew" then
+					opts.sign_text = " "
+					opts.sign_hl_group = "GitCompareOriginNew"
+				elseif hl == "GitCompareOriginModified" then
+					opts.sign_text = " "
+					opts.sign_hl_group = "GitCompareOriginModified"
 				end
 				pcall(vim.api.nvim_buf_set_extmark, bufnr, tree_ns, line_1 - 1, 0, opts)
 			end

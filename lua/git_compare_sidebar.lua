@@ -257,12 +257,15 @@ vim.bo[bufnr].modifiable = false
 
 vim.api.nvim_buf_clear_namespace(bufnr, sidebar_ns, 0, -1)
 
--- Header: blue background highlight across the full width.
+-- Header: blue background across full width including the sign column.
 pcall(vim.api.nvim_buf_set_extmark, bufnr, sidebar_ns, 0, 0, {
 line_hl_group = "GitComparePanelHeader",
+sign_text = " ",
+sign_hl_group = "GitComparePanelHeader",
 })
 
--- Combined background + virt_text; accept-tier also gets a gutter bar.
+-- Combined background + virt_text; sign column filled for all highlighted rows.
+-- Accept-tier shows ▌; origin-tier shows a coloured space to fill the sign bg.
 for _, e in ipairs(extmarks) do
 local opts = {}
 if e.line_hl then opts.line_hl_group = e.line_hl end
@@ -276,6 +279,12 @@ opts.sign_hl_group = "GitCompareAcceptNewSign"
 elseif e.line_hl == "GitCompareAcceptModified" then
 opts.sign_text = "▌"
 opts.sign_hl_group = "GitCompareAcceptModifiedSign"
+elseif e.line_hl == "GitCompareOriginNew" then
+opts.sign_text = " "
+opts.sign_hl_group = "GitCompareOriginNew"
+elseif e.line_hl == "GitCompareOriginModified" then
+opts.sign_text = " "
+opts.sign_hl_group = "GitCompareOriginModified"
 end
 pcall(vim.api.nvim_buf_set_extmark, bufnr, sidebar_ns, e.lnum_0 + HEADER_LINES, 0, opts)
 end
