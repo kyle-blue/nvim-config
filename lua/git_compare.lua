@@ -424,60 +424,66 @@ end
 
 -- ── Line hunks ────────────────────────────────────────────────────────────────
 
--- Convert a sorted list of 1-indexed line numbers into contiguous 0-indexed
--- ranges [{s, e}, ...].  One range extmark covers the whole block instead of
--- one line_hl_group extmark per line — the core Phase-1 performance win.
-local function lines_to_ranges(lines)
-	if #lines == 0 then return {} end
-	local ranges = {}
-	local s = lines[1] - 1  -- 1-indexed → 0-indexed
-	local e = s
-	for i = 2, #lines do
-		local c = lines[i] - 1
-		if c == e + 1 then
-			e = c
-		else
-			table.insert(ranges, { s = s, e = e })
-			s, e = c, c
-		end
-	end
-	table.insert(ranges, { s = s, e = e })
-	return ranges
-end
-
 -- Parse raw `git diff` output into hunk descriptors.
--- Each hunk: { ranges=[{s,e},...], kind="new"|"modified" }
--- ranges are 0-indexed, contiguous, ready for range extmarks.
+-- Each hunk: { ranges=[{s,e}], kind="new"|"modified" }, ranges 0-indexed.
+--
+-- Classification is per-line, not per-@@-block:
+--   A "+" line is "modified" (orange) only when it directly follows one or more
+--   "-" lines (i.e. it is replacing removed content).  Any "+" line not
+--   preceded by a pending removal — including pure insertions inside an
+--   otherwise mixed hunk — is "new" (green).
+--   A context line resets the pending-removal counter so that a "+" line
+--   after a gap of context is never treated as a replacement.
 local function parse_hunks(diff)
 	local hunks = {}
 	local cur = nil
+
+	local function finalize_cur()
+		if not cur or #cur.line_kinds == 0 then return end
+		local i = 1
+		while i <= #cur.line_kinds do
+			local lk = cur.line_kinds[i]
+			local s = lk.lnum - 1  -- 1-indexed → 0-indexed
+			local e = s
+			local kind = lk.kind
+			local j = i + 1
+			while j <= #cur.line_kinds do
+				local nk = cur.line_kinds[j]
+				if nk.kind ~= kind or nk.lnum - 1 ~= e + 1 then break end
+				e = nk.lnum - 1
+				j = j + 1
+			end
+			table.insert(hunks, { ranges = { { s = s, e = e } }, kind = kind })
+			i = j
+		end
+	end
+
 	for line in (diff .. "\n"):gmatch("([^\n]*)\n") do
 		local ns = line:match("^@@ %-%d+,?%d* %+(%d+),?%d* @@")
 		if ns then
-			if cur and #cur.lines > 0 then
-				cur.kind = (cur.has_added and cur.has_removed) and "modified" or "new"
-				cur.ranges = lines_to_ranges(cur.lines)
-				cur.lines = nil
-				table.insert(hunks, cur)
-			end
-			cur = { lines = {}, has_added = false, has_removed = false, lnum = tonumber(ns) }
+			finalize_cur()
+			cur = { line_kinds = {}, pending_removed = 0, lnum = tonumber(ns) }
 		elseif cur then
 			local ch = line:sub(1, 1)
 			if ch == "+" and line:sub(1, 3) ~= "+++" then
-				table.insert(cur.lines, cur.lnum); cur.has_added = true; cur.lnum = cur.lnum + 1
+				local kind
+				if cur.pending_removed > 0 then
+					kind = "modified"
+					cur.pending_removed = cur.pending_removed - 1
+				else
+					kind = "new"
+				end
+				table.insert(cur.line_kinds, { lnum = cur.lnum, kind = kind })
+				cur.lnum = cur.lnum + 1
 			elseif ch == "-" and line:sub(1, 3) ~= "---" then
-				cur.has_removed = true
+				cur.pending_removed = cur.pending_removed + 1
 			elseif ch == " " then
+				cur.pending_removed = 0
 				cur.lnum = cur.lnum + 1
 			end
 		end
 	end
-	if cur and #cur.lines > 0 then
-		cur.kind = (cur.has_added and cur.has_removed) and "modified" or "new"
-		cur.ranges = lines_to_ranges(cur.lines)
-		cur.lines = nil
-		table.insert(hunks, cur)
-	end
+	finalize_cur()
 	return hunks
 end
 
