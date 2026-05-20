@@ -37,7 +37,7 @@ return {
 	opts = {
 		picker = { enabled = true },
 		notifier = { enabled = true },
-		words = { enabled = true, debounce = 400 },
+		words = { enabled = true, debounce = 200 },
 		input = {
 			enabled = true,
 			win = {
