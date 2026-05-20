@@ -46,7 +46,9 @@ local function define_hl_groups()
 	vim.api.nvim_set_hl(0, "GitCompareBufAcceptModifiedSign", { fg = "#ffaa00" })
 
 	vim.api.nvim_set_hl(0, "GitComparePanelHeader", { bg = "#003070", fg = "#e8e8ff", bold = true })
-	vim.api.nvim_set_hl(0, "GitComparePanelFolder", { bold = true })
+	local ok, nvt_hl = pcall(vim.api.nvim_get_hl, 0, { name = "NvimTreeFolderName", link = false })
+	local folder_fg = (ok and nvt_hl and nvt_hl.fg) or 0x7aa2f7
+	vim.api.nvim_set_hl(0, "GitComparePanelFolder", { bold = true, fg = folder_fg })
 
 	for _, grp in ipairs({ "NvimTreeFolderName", "NvimTreeOpenedFolderName", "NvimTreeEmptyFolderName" }) do
 		local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = grp, link = false })
