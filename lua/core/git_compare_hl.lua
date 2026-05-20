@@ -384,20 +384,29 @@ function M.setup()
 		callback = function() vim.schedule(define_hl_groups) end,
 	})
 
-	-- Register scrollbar handler (lazy: reads from cache at render time).
+	-- Register scrollbar handler.
+	-- Marks are cached per-buffer keyed on file_gen so that scroll events (which
+	-- call handlers.show() on every WinScrolled) are O(1) — just a hash check.
+	-- Rebuild only happens after BufWritePost / FocusGained / HEAD change.
+	local _sb_mark_cache = {}  -- [bufnr] = { hash, marks }
 	pcall(function()
 		require("scrollbar.handlers").register("git_compare", function(bufnr)
-			local marks = {}
-			if vim.bo[bufnr].buftype ~= "" then return marks end
+			if vim.bo[bufnr].buftype ~= "" then return {} end
 			local filepath = vim.api.nvim_buf_get_name(bufnr)
-			if filepath == "" then return marks end
+			if filepath == "" then return {} end
 
-			local gc = require("git_compare")
+			local gc     = require("git_compare")
 			local origin   = gc.get_origin_commit()
 			local accepted = gc.get_accepted_commit()
-			local total    = vim.api.nvim_buf_line_count(bufnr)
-			-- For new-file (all-lines) case, cap mark density to avoid huge tables.
-			local stride   = math.max(1, math.floor(total / 200))
+			local hash   = gc.get_file_gen(filepath)
+				.. ":" .. (origin or "") .. ":" .. (accepted or "")
+
+			local cached = _sb_mark_cache[bufnr]
+			if cached and cached.hash == hash then return cached.marks end
+
+			local marks = {}
+			local total = vim.api.nvim_buf_line_count(bufnr)
+			local stride = math.max(1, math.floor(total / 200))
 
 			local function add_marks(commit, new_type, mod_type)
 				if not commit then return end
@@ -418,6 +427,7 @@ function M.setup()
 
 			add_marks(origin,   "GitCompareOriginNew",   "GitCompareOriginModified")
 			add_marks(accepted, "GitCompareAcceptNew",   "GitCompareAcceptModified")
+			_sb_mark_cache[bufnr] = { hash = hash, marks = marks }
 			return marks
 		end)
 	end)
