@@ -334,15 +334,16 @@ function M.warm_async(callback, force)
 		if not origin and not accepted then
 			callback(); return
 		end
+		-- Each commit needs two parallel fetches: file_status + numstat.
 		local remaining = 0
-		if origin    then remaining = remaining + 1 end
-		if accepted  then remaining = remaining + 1 end
+		if origin   then remaining = remaining + 2 end
+		if accepted then remaining = remaining + 2 end
 		local function done()
 			remaining = remaining - 1
 			if remaining == 0 then callback() end
 		end
-		if origin   then fetch_file_status_async(origin,   done) end
-		if accepted then fetch_file_status_async(accepted, done) end
+		if origin   then fetch_file_status_async(origin,   done); fetch_numstat_async(origin,   done) end
+		if accepted then fetch_file_status_async(accepted, done); fetch_numstat_async(accepted, done) end
 	end)
 end
 

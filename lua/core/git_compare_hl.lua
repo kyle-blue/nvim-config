@@ -425,35 +425,6 @@ function M.setup()
 		end,
 	})
 
-	-- TextChanged/InsertLeave: only for new (untracked) files where line count matters.
-	-- Debounced per-buffer at 300 ms.
-	local _text_timers = {}
-	vim.api.nvim_create_autocmd({ "TextChanged", "InsertLeave" }, {
-		group = augroup,
-		callback = function(ev)
-			local bufnr = ev.buf
-			if vim.bo[bufnr].buftype ~= "" then return end
-			local fp = vim.api.nvim_buf_get_name(bufnr)
-			if fp == "" then return end
-			local gc = require("git_compare")
-			-- Quick check: only matters if the file is new (all-lines highlight depends on count).
-			local os = gc.get_file_status(gc.get_origin_commit())
-			if not os.new[fp] then return end
-			local uv = vim.uv or vim.loop
-			if _text_timers[bufnr] then
-				pcall(function() _text_timers[bufnr]:stop(); _text_timers[bufnr]:close() end)
-			end
-			local t = uv.new_timer()
-			_text_timers[bufnr] = t
-			t:start(300, 0, vim.schedule_wrap(function()
-				pcall(function() t:stop(); t:close() end)
-				_text_timers[bufnr] = nil
-				gc.invalidate_file(fp)
-				apply_buf_hl(bufnr)
-			end))
-		end,
-	})
-
 	-- :Accept – snapshot working-tree as the accepted baseline.
 	vim.api.nvim_create_user_command("Accept", function()
 		vim.fn.system("git update-ref -d refs/nvim-accept/baseline 2>/dev/null")
