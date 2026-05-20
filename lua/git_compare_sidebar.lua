@@ -121,8 +121,11 @@ end
 
 local function render_tree(root, origin_status, accept_status, dir_open, commit)
 local lines = {}
-local highlights = {}
-local virt_texts = {} -- { lnum_0, vt = [{text,hl}] }
+-- Each entry: { lnum_0, line_hl=str|nil, vt=list|nil }
+-- Combined into ONE extmark so virt_text inherits the row's bg tint.
+local extmarks = {}
+-- Bold ranges for directory names: { lnum_0, col_s, col_e } (byte offsets).
+local bold_names = {}
 local node_data = {} -- lnum_1based → { abs_path, is_dir }
 
 local gc_mod = nil -- lazy-load git_compare only if needed
@@ -153,17 +156,15 @@ local text = pfx .. connector .. icon .. child.name .. (child.is_dir and "/" or 
 
 table.insert(lines, text)
 local lnum = #lines
-
-local hl = get_hl(child.abs_path, origin_status, accept_status)
-if hl then
-table.insert(highlights, { lnum_0 = lnum - 1, hl = hl })
-end
+local lnum_0 = lnum - 1
 
 node_data[lnum] = { abs_path = child.abs_path, is_dir = child.is_dir }
 
--- Diff stats as virtual text.
-if commit then
+local hl = get_hl(child.abs_path, origin_status, accept_status)
+
+-- Diff stats virtual text (same extmark as bg so bg colour is consistent).
 local vt = {}
+if commit then
 if child.is_dir then
 local s = gc().get_dir_stat(commit, child.abs_path)
 if s.added > 0 then table.insert(vt, { " +" .. s.added, "GitCompareStatAdd" }) end
@@ -174,9 +175,22 @@ local s = gc().get_file_stat(commit, child.abs_path)
 if s.added > 0 then table.insert(vt, { " +" .. s.added, "GitCompareStatAdd" }) end
 if s.removed > 0 then table.insert(vt, { " -" .. s.removed, "GitCompareStatDel" }) end
 end
-if #vt > 0 then
-table.insert(virt_texts, { lnum_0 = lnum - 1, vt = vt })
 end
+
+if hl or #vt > 0 then
+table.insert(extmarks, {
+lnum_0 = lnum_0,
+line_hl = hl,
+vt = #vt > 0 and vt or nil,
+})
+end
+
+-- Bold range for the directory name (byte offsets of child.name in the line).
+-- connector = "└ "/"├ " (4 bytes each), icon = "▾ "/"▸ " (4 bytes each).
+if child.is_dir then
+local col_s = #pfx + #connector + #icon
+local col_e = col_s + #child.name
+table.insert(bold_names, { lnum_0 = lnum_0, col_s = col_s, col_e = col_e })
 end
 
 if child.is_dir and is_open and next(child.children) then
@@ -186,14 +200,14 @@ end
 end
 
 walk(root, "")
-return lines, highlights, node_data, virt_texts
+return lines, extmarks, node_data, bold_names
 end
 
 -- ── Panel writer ──────────────────────────────────────────────────────────────
 
 local HEADER_LINES = 1 -- just the title line; no separator line below it
 
-local function write_panel(bufnr, header, lines, highlights, virt_texts)
+local function write_panel(bufnr, header, lines, extmarks, bold_names)
 if not (bufnr and vim.api.nvim_buf_is_valid(bufnr)) then
 return
 end
@@ -213,18 +227,23 @@ pcall(vim.api.nvim_buf_set_extmark, bufnr, sidebar_ns, 0, 0, {
 line_hl_group = "GitComparePanelHeader",
 })
 
--- Tree node background highlights (offset by HEADER_LINES).
-for _, h in ipairs(highlights) do
-pcall(vim.api.nvim_buf_set_extmark, bufnr, sidebar_ns, h.lnum_0 + HEADER_LINES, 0, {
-line_hl_group = h.hl,
-})
+-- Combined background + virt_text in ONE extmark so the virtual text
+-- is rendered on top of the row tint rather than on the Normal background.
+for _, e in ipairs(extmarks) do
+local opts = {}
+if e.line_hl then opts.line_hl_group = e.line_hl end
+if e.vt then
+opts.virt_text = e.vt
+opts.virt_text_pos = "eol"
+end
+pcall(vim.api.nvim_buf_set_extmark, bufnr, sidebar_ns, e.lnum_0 + HEADER_LINES, 0, opts)
 end
 
--- Tree node diff-stat virtual text (offset by HEADER_LINES).
-for _, v in ipairs(virt_texts) do
-pcall(vim.api.nvim_buf_set_extmark, bufnr, sidebar_ns, v.lnum_0 + HEADER_LINES, 0, {
-virt_text = v.vt,
-virt_text_pos = "eol",
+-- Bold directory names (inline highlight on the name's byte range).
+for _, b in ipairs(bold_names) do
+pcall(vim.api.nvim_buf_set_extmark, bufnr, sidebar_ns, b.lnum_0 + HEADER_LINES, b.col_s, {
+end_col = b.col_e,
+hl_group = "GitComparePanelFolder",
 })
 end
 end
@@ -274,9 +293,9 @@ local accept_status = gc.get_file_status(accept_commit)
 if state.origin_buf and vim.api.nvim_buf_is_valid(state.origin_buf) then
 local paths = collect_paths(origin_fl)
 local tree = build_path_tree(paths, git_root)
-local lines, hls, node_data, virt_texts =
+local lines, extmarks, node_data, bold_names =
 render_tree(tree, origin_status, accept_status, state.origin_dir_open, origin_commit)
-write_panel(state.origin_buf, " Origin Changes", lines, hls, virt_texts)
+write_panel(state.origin_buf, " Origin Changes", lines, extmarks, bold_names)
 state.origin_node_data = {}
 for lnum, d in pairs(node_data) do
 state.origin_node_data[lnum + HEADER_LINES] = d
@@ -286,9 +305,9 @@ end
 if state.accept_buf and vim.api.nvim_buf_is_valid(state.accept_buf) then
 local paths = collect_paths(accept_fl)
 local tree = build_path_tree(paths, git_root)
-local lines, hls, node_data, virt_texts =
+local lines, extmarks, node_data, bold_names =
 render_tree(tree, origin_status, accept_status, state.accept_dir_open, accept_commit)
-write_panel(state.accept_buf, " Accept Changes", lines, hls, virt_texts)
+write_panel(state.accept_buf, " Accept Changes", lines, extmarks, bold_names)
 state.accept_node_data = {}
 for lnum, d in pairs(node_data) do
 state.accept_node_data[lnum + HEADER_LINES] = d

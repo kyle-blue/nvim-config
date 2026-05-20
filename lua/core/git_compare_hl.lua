@@ -34,12 +34,14 @@ local function define_hl_groups()
 	vim.api.nvim_set_hl(0, "GitCompareBufAcceptNew", { bg = "#182c18" })
 	vim.api.nvim_set_hl(0, "GitCompareBufAcceptModified", { bg = "#361a00" })
 
-	-- Diff stat virtual text colours (bright, bold).
-	vim.api.nvim_set_hl(0, "GitCompareStatAdd", { fg = "#00ff44", bold = true })
-	vim.api.nvim_set_hl(0, "GitCompareStatDel", { fg = "#ff3333", bold = true })
-	vim.api.nvim_set_hl(0, "GitCompareStatChg", { fg = "#ff9900", bold = true })
+	-- Diff stat virtual text colours (bright, no bold so they don't overpower names).
+	vim.api.nvim_set_hl(0, "GitCompareStatAdd", { fg = "#00ff44" })
+	vim.api.nvim_set_hl(0, "GitCompareStatDel", { fg = "#ff3333" })
+	vim.api.nvim_set_hl(0, "GitCompareStatChg", { fg = "#ff9900" })
 	-- Sidebar panel header: blue background, bright foreground, bold.
 	vim.api.nvim_set_hl(0, "GitComparePanelHeader", { bg = "#003070", fg = "#e8e8ff", bold = true })
+	-- Sidebar directory name: bold only (inherits fg/bg from the row highlight).
+	vim.api.nvim_set_hl(0, "GitComparePanelFolder", { bold = true })
 
 	-- Make nvim-tree folder names bold (read → modify → write to preserve fg/bg).
 	for _, grp in ipairs({
@@ -252,41 +254,31 @@ local function setup_tree_hl()
 				stat_commit = origin_commit
 			end
 
-			if hl then
-				pcall(vim.api.nvim_buf_set_extmark, bufnr, tree_ns, line_1 - 1, 0, {
-					line_hl_group = hl,
-				})
-			end
-
-			-- Append diff stats as virtual text to the right of each changed entry.
+			-- Build diff-stat virtual text for changed entries.
+			local vt = {}
 			if stat_commit then
-				local vt = {}
 				if is_dir then
 					local s = gc.get_dir_stat(stat_commit, abs_path)
-					if s.added > 0 then
-						table.insert(vt, { " +" .. s.added, "GitCompareStatAdd" })
-					end
-					if s.deleted > 0 then
-						table.insert(vt, { " -" .. s.deleted, "GitCompareStatDel" })
-					end
-					if s.changed > 0 then
-						table.insert(vt, { " ~" .. s.changed, "GitCompareStatChg" })
-					end
+					if s.added > 0 then table.insert(vt, { " +" .. s.added, "GitCompareStatAdd" }) end
+					if s.deleted > 0 then table.insert(vt, { " -" .. s.deleted, "GitCompareStatDel" }) end
+					if s.changed > 0 then table.insert(vt, { " ~" .. s.changed, "GitCompareStatChg" }) end
 				else
 					local s = gc.get_file_stat(stat_commit, abs_path)
-					if s.added > 0 then
-						table.insert(vt, { " +" .. s.added, "GitCompareStatAdd" })
-					end
-					if s.removed > 0 then
-						table.insert(vt, { " -" .. s.removed, "GitCompareStatDel" })
-					end
+					if s.added > 0 then table.insert(vt, { " +" .. s.added, "GitCompareStatAdd" }) end
+					if s.removed > 0 then table.insert(vt, { " -" .. s.removed, "GitCompareStatDel" }) end
 				end
+			end
+
+			-- Combine background highlight and virt_text into ONE extmark so the
+			-- virtual text is rendered on top of the row tint (not on Normal bg).
+			if hl or #vt > 0 then
+				local opts = {}
+				if hl then opts.line_hl_group = hl end
 				if #vt > 0 then
-					pcall(vim.api.nvim_buf_set_extmark, bufnr, tree_ns, line_1 - 1, 0, {
-						virt_text = vt,
-						virt_text_pos = "eol",
-					})
+					opts.virt_text = vt
+					opts.virt_text_pos = "eol"
 				end
+				pcall(vim.api.nvim_buf_set_extmark, bufnr, tree_ns, line_1 - 1, 0, opts)
 			end
 		end
 	end)
