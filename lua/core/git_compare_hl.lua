@@ -59,7 +59,51 @@ end
 local ns = vim.api.nvim_create_namespace("git_compare_hl")
 
 local _buf_hl_cache  = {}  -- bufnr → hash string
-local _buf_mark_ids  = {}  -- bufnr → set of current extmark IDs (Phase 4: avoids full-scan)
+local _buf_mark_ids  = {}  -- bufnr → sign extmark ID set (O(hunks), Phase 4)
+local _buf_ranges    = {}  -- bufnr → { origin=[{s,e,hl}], accept=[{s,e,hl,sign_hl}] }
+
+-- Binary search for the range that contains `row` (0-indexed).
+-- sorted_ranges must be sorted ascending by .s.  Returns range or nil.
+local function find_range(sorted, row)
+	local lo, hi = 1, #sorted
+	while lo <= hi do
+		local mid = math.floor((lo + hi) / 2)
+		local r = sorted[mid]
+		if row < r.s then hi = mid - 1
+		elseif row > r.e then lo = mid + 1
+		else return r end
+	end
+end
+
+-- Phase 5: decoration provider — zero stored background extmarks.
+-- on_line is called by Neovim for every rendered line; it applies ephemeral
+-- extmarks (not stored in the B-tree) computed from a prebuilt Lua table.
+-- Per visible line: 2 binary searches + 0-2 ephemeral extmark calls → O(log n).
+vim.api.nvim_set_decoration_provider(ns, {
+	on_win = function(_, _, bufnr, _, _)
+		return _buf_ranges[bufnr] ~= nil
+	end,
+	on_line = function(_, _, bufnr, row)
+		local data = _buf_ranges[bufnr]
+		if not data then return end
+		local o = find_range(data.origin, row)
+		if o then
+			vim.api.nvim_buf_set_extmark(bufnr, ns, row, 0, {
+				hl_group = o.hl, hl_eol = true,
+				end_row = row + 1, end_col = 0,
+				priority = 10, ephemeral = true,
+			})
+		end
+		local a = find_range(data.accept, row)
+		if a then
+			vim.api.nvim_buf_set_extmark(bufnr, ns, row, 0, {
+				hl_group = a.hl, hl_eol = true,
+				end_row = row + 1, end_col = 0,
+				priority = 20, ephemeral = true,
+			})
+		end
+	end,
+})
 
 local function buf_hl_hash(bufnr, filepath, file_gen, origin_status, accept_status)
 	local of = origin_status.new[filepath] and "on" or origin_status.modified[filepath] and "om" or ""
@@ -69,14 +113,12 @@ local function buf_hl_hash(bufnr, filepath, file_gen, origin_status, accept_stat
 	return file_gen .. ":" .. of .. ":" .. af .. ":" .. vim.api.nvim_buf_line_count(bufnr)
 end
 
--- Apply buffer highlights from cache.  Never calls git directly.
--- Must be called after warm_async has completed.
--- Phase 1: uses hl_group+end_row range extmarks (O(hunks)) instead of
---          line_hl_group per-line extmarks (O(changed_lines)).
--- Phase 2: sign_text (▌) placed only at each range's first line.
--- Phase 4: ID-table swap instead of nvim_buf_get_extmarks full scan.
--- Uses set-new-then-delete-old so there is never a zero-highlight frame.
-local function apply_buf_hl_from_cache(bufnr)
+-- Build the per-buffer range lookup tables used by the decoration provider,
+-- and set sign extmarks (▌) at the start of each accept-tier range.
+-- Phase 5: background highlights are fully handled by the decoration provider
+--          (zero stored background extmarks); signs remain regular extmarks.
+-- Never calls git directly; must be called after warm_async has completed.
+local function build_buf_ranges(bufnr)
 	if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then return end
 	if vim.bo[bufnr].buftype ~= "" then return end
 	local filepath = vim.api.nvim_buf_get_name(bufnr)
@@ -92,27 +134,18 @@ local function apply_buf_hl_from_cache(bufnr)
 	if _buf_hl_cache[bufnr] == hash then return end
 	_buf_hl_cache[bufnr] = hash
 
-	-- Phase 4: swap ID table instead of scanning Neovim's extmark B-tree.
-	local old_ids = _buf_mark_ids[bufnr] or {}
-	local new_ids = {}
-	local function set(lnum, opts)
-		local ok, id = pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, lnum, 0, opts)
-		if ok then new_ids[id] = true end
-	end
+	local count = vim.api.nvim_buf_line_count(bufnr)
+	local origin_ranges = {}
+	local accept_ranges = {}
 
 	if origin then
 		if origin_status.new[filepath] then
-			-- Phase 1: single extmark covers the entire new file.
-			local count = vim.api.nvim_buf_line_count(bufnr)
-			set(0, { end_row = count, end_col = 0,
-				hl_group = "GitCompareBufOriginNew", hl_eol = true, priority = 10 })
+			table.insert(origin_ranges, { s = 0, e = count - 1, hl = "GitCompareBufOriginNew" })
 		else
 			for _, hunk in ipairs(gc.get_line_hunks(origin, filepath)) do
 				local hl = hunk.kind == "new" and "GitCompareBufOriginNew" or "GitCompareBufOriginModified"
-				for _, range in ipairs(hunk.ranges) do
-					-- Phase 1: one range extmark per contiguous block of changed lines.
-					set(range.s, { end_row = range.e + 1, end_col = 0,
-						hl_group = hl, hl_eol = true, priority = 10 })
+				for _, r in ipairs(hunk.ranges) do
+					table.insert(origin_ranges, { s = r.s, e = r.e, hl = hl })
 				end
 			end
 		end
@@ -120,39 +153,44 @@ local function apply_buf_hl_from_cache(bufnr)
 
 	if accepted then
 		if accept_status.new[filepath] then
-			local count = vim.api.nvim_buf_line_count(bufnr)
-			-- Phase 1: single background extmark for whole new file.
-			set(0, { end_row = count, end_col = 0,
-				hl_group = "GitCompareBufAcceptNew", hl_eol = true, priority = 20 })
-			-- Phase 2: single sign at line 0 (top of file).
-			set(0, { sign_text = "▌", sign_hl_group = "GitCompareBufAcceptNewSign", priority = 20 })
+			table.insert(accept_ranges, { s = 0, e = count - 1,
+				hl = "GitCompareBufAcceptNew", sign_hl = "GitCompareBufAcceptNewSign" })
 		else
 			for _, hunk in ipairs(gc.get_line_hunks(accepted, filepath)) do
 				local hl      = hunk.kind == "new" and "GitCompareBufAcceptNew"      or "GitCompareBufAcceptModified"
 				local sign_hl = hunk.kind == "new" and "GitCompareBufAcceptNewSign"  or "GitCompareBufAcceptModifiedSign"
-				for _, range in ipairs(hunk.ranges) do
-					-- Phase 1: background range extmark.
-					set(range.s, { end_row = range.e + 1, end_col = 0,
-						hl_group = hl, hl_eol = true, priority = 20 })
-					-- Phase 2: sign only at the first line of each changed block.
-					set(range.s, { sign_text = "▌", sign_hl_group = sign_hl, priority = 20 })
+				for _, r in ipairs(hunk.ranges) do
+					table.insert(accept_ranges, { s = r.s, e = r.e, hl = hl, sign_hl = sign_hl })
 				end
 			end
 		end
 	end
 
-	-- Phase 4: delete IDs that were not refreshed (no B-tree scan needed).
+	-- Atomically replace the range tables.  No extmarks are cleared so there
+	-- is never a zero-highlight frame; the provider uses new tables immediately.
+	_buf_ranges[bufnr] = { origin = origin_ranges, accept = accept_ranges }
+
+	-- Sign extmarks (▌) at range starts only — O(hunks), not O(changed_lines).
+	local old_ids = _buf_mark_ids[bufnr] or {}
+	local new_ids = {}
+	for _, r in ipairs(accept_ranges) do
+		local ok, id = pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, r.s, 0, {
+			sign_text = "▌", sign_hl_group = r.sign_hl, priority = 20,
+		})
+		if ok then new_ids[id] = true end
+	end
 	for id in pairs(old_ids) do
-		if not new_ids[id] then
-			pcall(vim.api.nvim_buf_del_extmark, bufnr, ns, id)
-		end
+		if not new_ids[id] then pcall(vim.api.nvim_buf_del_extmark, bufnr, ns, id) end
 	end
 	_buf_mark_ids[bufnr] = new_ids
+
+	-- Invalidate the screen so the decoration provider applies the new ranges.
+	pcall(vim.api.nvim__redraw, { buf = bufnr, valid = false })
 end
 
 -- Public entry-point used by git_compare.lua's get_line_hunks() lazy-load.
 function M.apply_buf(bufnr)
-	apply_buf_hl_from_cache(bufnr)
+	build_buf_ranges(bufnr)
 end
 
 -- Warms line-hunks for the current file then applies highlights.
@@ -178,7 +216,7 @@ local function apply_buf_hl(bufnr)
 	local function done()
 		remaining = remaining - 1
 		if remaining == 0 then
-			apply_buf_hl_from_cache(bufnr)
+			build_buf_ranges(bufnr)
 			pcall(function() require("scrollbar.handlers").show() end)
 		end
 	end
@@ -192,7 +230,7 @@ local function apply_buf_hl(bufnr)
 		gc.warm_line_hunks_async(accepted, filepath, done)
 	end
 	if remaining == 0 then
-		apply_buf_hl_from_cache(bufnr)
+		build_buf_ranges(bufnr)
 		pcall(function() require("scrollbar.handlers").show() end)
 	end
 end
@@ -470,6 +508,7 @@ function M.setup()
 			local b = ev.buf
 			_buf_hl_cache[b] = nil
 			_buf_mark_ids[b] = nil
+			_buf_ranges[b]   = nil
 		end,
 	})
 
