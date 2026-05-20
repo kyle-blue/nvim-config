@@ -34,6 +34,11 @@ origin_dir_open = {},
 accept_dir_open = {},
 }
 
+-- Tracks the last NvimTree / git_compare_panel window the user was in so that
+-- <C-w>h from an editor window returns to it rather than always jumping to the
+-- topmost left pane (nvim-tree).
+local _last_left_win = nil
+
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
 local function find_tree_win()
@@ -353,6 +358,21 @@ end
 local opts = { buffer = bufnr, noremap = true, silent = true }
 vim.keymap.set("n", "<CR>", on_activate, opts)
 vim.keymap.set("n", "o", on_activate, opts)
+
+-- Auto-skip the header line: if cursor lands on line 1 AND the panel has
+-- content (line count > 1), jump down to line 2.  When the panel is empty
+-- (only the header), leave the cursor alone so the window stays navigable.
+vim.api.nvim_create_autocmd({ "CursorMoved", "WinEnter" }, {
+buffer = bufnr,
+callback = function()
+if vim.api.nvim_buf_line_count(bufnr) > 1 then
+local row = vim.api.nvim_win_get_cursor(0)[1]
+if row == 1 then
+vim.api.nvim_win_set_cursor(0, { 2, 0 })
+end
+end
+end,
+})
 end
 
 -- ── Window management ─────────────────────────────────────────────────────────
@@ -368,6 +388,8 @@ state.origin_buf = nil
 state.accept_buf = nil
 state.origin_node_data = {}
 state.accept_node_data = {}
+-- Forget the last left window; it will be re-set on the next WinEnter.
+_last_left_win = nil
 end
 
 -- Open two panel windows below nvim-tree, CONFINED to the tree column.
@@ -459,6 +481,34 @@ end)
 tree_api.events.subscribe(tree_api.events.Event.TreeClose, function()
 M.close_panels()
 end)
+
+-- ── Track last focused left-panel window ─────────────────────────────────
+local augroup = vim.api.nvim_create_augroup("GitCompareSidebarNav", { clear = true })
+vim.api.nvim_create_autocmd("WinEnter", {
+group = augroup,
+callback = function()
+local win = vim.api.nvim_get_current_win()
+local ft = vim.bo[vim.api.nvim_win_get_buf(win)].filetype
+if ft == "NvimTree" or ft == "git_compare_panel" then
+_last_left_win = win
+end
+end,
+})
+
+-- ── Smart <C-w>h: return to the last focused left-panel window ───────────
+-- Falls back to the built-in wincmd h when already in the left column or
+-- when no left window has been visited yet.
+local function smart_left()
+local cur_ft = vim.bo[vim.api.nvim_win_get_buf(vim.api.nvim_get_current_win())].filetype
+if cur_ft ~= "NvimTree" and cur_ft ~= "git_compare_panel"
+and _last_left_win and vim.api.nvim_win_is_valid(_last_left_win) then
+vim.api.nvim_set_current_win(_last_left_win)
+else
+vim.cmd("wincmd h")
+end
+end
+vim.keymap.set("n", "<C-w>h", smart_left, { noremap = true, silent = true, desc = "Go to last focused left panel" })
+vim.keymap.set("n", "<C-w><C-h>", smart_left, { noremap = true, silent = true, desc = "Go to last focused left panel" })
 end
 
 return M
