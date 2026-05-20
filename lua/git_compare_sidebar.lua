@@ -335,6 +335,54 @@ end
 local _sidebar_hash = { origin = "", accept = "" }
 local _refresh_timer = nil
 
+-- Core render logic (no debounce).  Always reads from the in-memory cache so
+-- it never blocks; safe to call synchronously from keymaps.
+local function do_refresh()
+	local gc = require("git_compare")
+	local git_root = gc.git_root()
+	if not git_root then return end
+
+	local origin_commit = gc.get_origin_commit()
+	local accept_commit = gc.get_accepted_commit()
+	local origin_fl     = gc.get_changed_file_list(origin_commit)
+	local accept_fl     = gc.get_changed_file_list(accept_commit)
+	local origin_status = gc.get_file_status(origin_commit)
+	local accept_status = gc.get_file_status(accept_commit)
+
+	local new_origin_hash = fl_hash(origin_fl, state.origin_dir_open)
+	local new_accept_hash = fl_hash(accept_fl,  state.accept_dir_open)
+
+	if state.origin_buf and vim.api.nvim_buf_is_valid(state.origin_buf)
+			and new_origin_hash ~= _sidebar_hash.origin then
+		_sidebar_hash.origin = new_origin_hash
+		local paths = collect_paths(origin_fl)
+		local tree  = build_path_tree(paths, git_root)
+		local lines, extmarks, node_data, bold_names =
+			render_tree(tree, origin_status, accept_status, state.origin_dir_open, origin_commit)
+		write_panel(state.origin_buf, " Origin Changes", lines, extmarks, bold_names)
+		state.origin_node_data = {}
+		for lnum, d in pairs(node_data) do
+			state.origin_node_data[lnum + HEADER_LINES] = d
+		end
+	end
+
+	if state.accept_buf and vim.api.nvim_buf_is_valid(state.accept_buf)
+			and new_accept_hash ~= _sidebar_hash.accept then
+		_sidebar_hash.accept = new_accept_hash
+		local paths = collect_paths(accept_fl)
+		local tree  = build_path_tree(paths, git_root)
+		local lines, extmarks, node_data, bold_names =
+			render_tree(tree, origin_status, accept_status, state.accept_dir_open, accept_commit)
+		write_panel(state.accept_buf, " Accept Changes", lines, extmarks, bold_names)
+		state.accept_node_data = {}
+		for lnum, d in pairs(node_data) do
+			state.accept_node_data[lnum + HEADER_LINES] = d
+		end
+	end
+end
+
+-- Public entry for external callers (git watcher, autocmds).
+-- Debounced so rapid consecutive events collapse into one render pass.
 function M.refresh()
 	local any = (state.origin_buf and vim.api.nvim_buf_is_valid(state.origin_buf))
 		or (state.accept_buf and vim.api.nvim_buf_is_valid(state.accept_buf))
@@ -348,48 +396,7 @@ function M.refresh()
 	_refresh_timer = uv.new_timer()
 	_refresh_timer:start(200, 0, vim.schedule_wrap(function()
 		_refresh_timer = nil
-
-		local gc = require("git_compare")
-		local git_root = gc.git_root()
-		if not git_root then return end
-
-		local origin_commit = gc.get_origin_commit()
-		local accept_commit = gc.get_accepted_commit()
-		local origin_fl     = gc.get_changed_file_list(origin_commit)
-		local accept_fl     = gc.get_changed_file_list(accept_commit)
-		local origin_status = gc.get_file_status(origin_commit)
-		local accept_status = gc.get_file_status(accept_commit)
-
-		local new_origin_hash = fl_hash(origin_fl, state.origin_dir_open)
-		local new_accept_hash = fl_hash(accept_fl,  state.accept_dir_open)
-
-		if state.origin_buf and vim.api.nvim_buf_is_valid(state.origin_buf)
-				and new_origin_hash ~= _sidebar_hash.origin then
-			_sidebar_hash.origin = new_origin_hash
-			local paths = collect_paths(origin_fl)
-			local tree  = build_path_tree(paths, git_root)
-			local lines, extmarks, node_data, bold_names =
-				render_tree(tree, origin_status, accept_status, state.origin_dir_open, origin_commit)
-			write_panel(state.origin_buf, " Origin Changes", lines, extmarks, bold_names)
-			state.origin_node_data = {}
-			for lnum, d in pairs(node_data) do
-				state.origin_node_data[lnum + HEADER_LINES] = d
-			end
-		end
-
-		if state.accept_buf and vim.api.nvim_buf_is_valid(state.accept_buf)
-				and new_accept_hash ~= _sidebar_hash.accept then
-			_sidebar_hash.accept = new_accept_hash
-			local paths = collect_paths(accept_fl)
-			local tree  = build_path_tree(paths, git_root)
-			local lines, extmarks, node_data, bold_names =
-				render_tree(tree, origin_status, accept_status, state.accept_dir_open, accept_commit)
-			write_panel(state.accept_buf, " Accept Changes", lines, extmarks, bold_names)
-			state.accept_node_data = {}
-			for lnum, d in pairs(node_data) do
-				state.accept_node_data[lnum + HEADER_LINES] = d
-			end
-		end
+		do_refresh()
 	end))
 end
 -- ── Keymaps ───────────────────────────────────────────────────────────────────
@@ -421,7 +428,7 @@ dir_open[node.abs_path] = nil -- collapse
 else
 dir_open[node.abs_path] = true -- expand
 end
-M.refresh()
+do_refresh()
 else
 open_file_in_editor(node.abs_path)
 end
@@ -539,7 +546,7 @@ function() return state.accept_dir_open end
 )
 
 vim.schedule(function()
-M.refresh()
+do_refresh()
 -- Use defer_fn (150ms) instead of vim.schedule so the restore fires
 -- reliably AFTER nvim-tree finishes all its own async focus management.
 -- Two nested vim.schedule calls were not enough; nvim-tree re-grabs focus
