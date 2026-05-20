@@ -7,5 +7,8 @@ return {
 	---@type render.md.UserConfig
 	opts = {
 		enabled = false,
+		win_options = {
+			wrap = { default = false, rendered = true },
+		},
 	},
 }
