@@ -404,13 +404,13 @@ function M.setup()
 				local status = gc.get_file_status(commit)
 				if status.new[filepath] then
 					for lnum = 0, total - 1, stride do
-						table.insert(marks, { line = lnum, type = new_type, level = 1 })
+						table.insert(marks, { line = lnum, text = "▌", type = new_type, level = 1 })
 					end
 				else
 					for _, hunk in ipairs(gc.get_line_hunks(commit, filepath)) do
 						local t = hunk.kind == "new" and new_type or mod_type
 						for _, lnum in ipairs(hunk.lines) do
-							table.insert(marks, { line = lnum - 1, type = t, level = 1 })
+							table.insert(marks, { line = lnum - 1, text = "▌", type = t, level = 1 })
 						end
 					end
 				end
