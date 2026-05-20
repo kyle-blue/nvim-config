@@ -165,7 +165,13 @@ local function apply_buf_hl(bufnr)
 
 	-- Need hunks for modified files – warm async, apply when ready.
 	local remaining = 0
-	local function done() remaining = remaining - 1; if remaining == 0 then apply_buf_hl_from_cache(bufnr) end end
+	local function done()
+		remaining = remaining - 1
+		if remaining == 0 then
+			apply_buf_hl_from_cache(bufnr)
+			pcall(function() require("scrollbar.handlers").show() end)
+		end
+	end
 
 	if origin and not origin_status.new[filepath] then
 		remaining = remaining + 1
@@ -177,6 +183,7 @@ local function apply_buf_hl(bufnr)
 	end
 	if remaining == 0 then
 		apply_buf_hl_from_cache(bufnr)
+		pcall(function() require("scrollbar.handlers").show() end)
 	end
 end
 
@@ -190,6 +197,8 @@ local function refresh_visible_bufs()
 			apply_buf_hl(bufnr)
 		end
 	end
+	-- Refresh scrollbar marks for the active buffer after highlights settle.
+	pcall(function() require("scrollbar.handlers").show() end)
 end
 
 -- ── Debounced refresh coordinator ────────────────────────────────────────────
@@ -374,6 +383,44 @@ function M.setup()
 		group = vim.api.nvim_create_augroup("GitCompareHLGroups", { clear = true }),
 		callback = function() vim.schedule(define_hl_groups) end,
 	})
+
+	-- Register scrollbar handler (lazy: reads from cache at render time).
+	pcall(function()
+		require("scrollbar.handlers").register("git_compare", function(bufnr)
+			local marks = {}
+			if vim.bo[bufnr].buftype ~= "" then return marks end
+			local filepath = vim.api.nvim_buf_get_name(bufnr)
+			if filepath == "" then return marks end
+
+			local gc = require("git_compare")
+			local origin   = gc.get_origin_commit()
+			local accepted = gc.get_accepted_commit()
+			local total    = vim.api.nvim_buf_line_count(bufnr)
+			-- For new-file (all-lines) case, cap mark density to avoid huge tables.
+			local stride   = math.max(1, math.floor(total / 200))
+
+			local function add_marks(commit, new_type, mod_type)
+				if not commit then return end
+				local status = gc.get_file_status(commit)
+				if status.new[filepath] then
+					for lnum = 0, total - 1, stride do
+						table.insert(marks, { line = lnum, type = new_type, level = 1 })
+					end
+				else
+					for _, hunk in ipairs(gc.get_line_hunks(commit, filepath)) do
+						local t = hunk.kind == "new" and new_type or mod_type
+						for _, lnum in ipairs(hunk.lines) do
+							table.insert(marks, { line = lnum - 1, type = t, level = 1 })
+						end
+					end
+				end
+			end
+
+			add_marks(origin,   "GitCompareOriginNew",   "GitCompareOriginModified")
+			add_marks(accepted, "GitCompareAcceptNew",   "GitCompareAcceptModified")
+			return marks
+		end)
+	end)
 
 	setup_tree_hl()
 	setup_git_watchers()
