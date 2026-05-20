@@ -277,6 +277,9 @@ local function setup_tree_hl()
 				if #vt > 0 then
 					opts.virt_text = vt
 					opts.virt_text_pos = "eol"
+					-- "combine" layers the stat fg on top of the line_hl_group bg
+					-- instead of replacing it with Normal bg.
+					opts.virt_text_hl_mode = "combine"
 				end
 				pcall(vim.api.nvim_buf_set_extmark, bufnr, tree_ns, line_1 - 1, 0, opts)
 			end

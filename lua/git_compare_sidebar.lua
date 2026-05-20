@@ -39,6 +39,22 @@ accept_dir_open = {},
 -- topmost left pane (nvim-tree).
 local _last_left_win = nil
 
+-- Persists the left-panel position across NvimTree open/close cycles.
+-- { win_type = "nvimtree"|"origin"|"accept", lnum = N }
+local _saved_left_pos = nil
+
+local function win_type(win)
+if not (win and vim.api.nvim_win_is_valid(win)) then return nil end
+local ft = vim.bo[vim.api.nvim_win_get_buf(win)].filetype
+if ft == "NvimTree" then return "nvimtree" end
+if ft == "git_compare_panel" then
+local bufnr = vim.api.nvim_win_get_buf(win)
+if bufnr == state.origin_buf then return "origin" end
+if bufnr == state.accept_buf then return "accept" end
+end
+return nil
+end
+
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
 local function find_tree_win()
@@ -240,6 +256,9 @@ if e.line_hl then opts.line_hl_group = e.line_hl end
 if e.vt then
 opts.virt_text = e.vt
 opts.virt_text_pos = "eol"
+-- "combine" layers the stat fg on top of the line_hl_group bg
+-- instead of reverting to Normal bg.
+opts.virt_text_hl_mode = "combine"
 end
 pcall(vim.api.nvim_buf_set_extmark, bufnr, sidebar_ns, e.lnum_0 + HEADER_LINES, 0, opts)
 end
@@ -378,6 +397,16 @@ end
 -- ── Window management ─────────────────────────────────────────────────────────
 
 function M.close_panels()
+-- Save where the user was so we can restore it on next open.
+if _last_left_win and vim.api.nvim_win_is_valid(_last_left_win) then
+local wt = win_type(_last_left_win)
+if wt then
+_saved_left_pos = {
+win_type = wt,
+lnum = vim.api.nvim_win_get_cursor(_last_left_win)[1],
+}
+end
+end
 for _, k in ipairs({ "origin_win", "accept_win" }) do
 if state[k] and vim.api.nvim_win_is_valid(state[k]) then
 pcall(vim.api.nvim_win_close, state[k], true)
@@ -463,7 +492,29 @@ function() return state.accept_node_data end,
 function() return state.accept_dir_open end
 )
 
-vim.schedule(M.refresh)
+vim.schedule(function()
+M.refresh()
+-- After panels are populated, restore the saved left-panel position.
+local pos = _saved_left_pos
+if not pos then return end
+local target_win, target_buf
+if pos.win_type == "origin" and state.origin_win and vim.api.nvim_win_is_valid(state.origin_win) then
+target_win = state.origin_win
+target_buf = state.origin_buf
+elseif pos.win_type == "accept" and state.accept_win and vim.api.nvim_win_is_valid(state.accept_win) then
+target_win = state.accept_win
+target_buf = state.accept_buf
+elseif pos.win_type == "nvimtree" then
+target_win = find_tree_win()
+end
+if not target_win then return end
+local line_count = target_buf and vim.api.nvim_buf_line_count(target_buf) or vim.api.nvim_buf_line_count(vim.api.nvim_win_get_buf(target_win))
+local lnum = math.min(pos.lnum, math.max(1, line_count))
+-- For panel buffers skip line 1 (header).
+if target_buf and lnum < HEADER_LINES + 1 then lnum = HEADER_LINES + 1 end
+pcall(vim.api.nvim_win_set_cursor, target_win, { lnum, 0 })
+_last_left_win = target_win
+end)
 end
 
 -- ── Setup ─────────────────────────────────────────────────────────────────────
