@@ -53,9 +53,14 @@ local function define_hl_groups()
 		end
 	end
 
-	-- Accept-tier gutter bars: brightest possible fg, visible over the bg tints.
-	vim.api.nvim_set_hl(0, "GitCompareAcceptNewSign",      { fg = "#00ffaa" })
-	vim.api.nvim_set_hl(0, "GitCompareAcceptModifiedSign", { fg = "#ffaa00" })
+	-- Accept-tier gutter bars: explicit fg+bg so the sign column inherits the
+	-- correct row tint (sign_hl_group does NOT inherit line_hl_group background).
+	-- Tree / sidebar panels use the standard accept tint colours.
+	vim.api.nvim_set_hl(0, "GitCompareAcceptNewSign",      { fg = "#00ffaa", bg = "#1f4020" })
+	vim.api.nvim_set_hl(0, "GitCompareAcceptModifiedSign", { fg = "#ffaa00", bg = "#4a2500" })
+	-- Buffer variants: slightly different bg matching the buffer-level tints.
+	vim.api.nvim_set_hl(0, "GitCompareBufAcceptNewSign",      { fg = "#00ffaa", bg = "#182c18" })
+	vim.api.nvim_set_hl(0, "GitCompareBufAcceptModifiedSign", { fg = "#ffaa00", bg = "#361a00" })
 
 	-- Sidebar panel header: blue background, bright foreground, bold.
 	vim.api.nvim_set_hl(0, "GitComparePanelHeader", { bg = "#003070", fg = "#e8e8ff", bold = true })
@@ -159,11 +164,11 @@ local function apply_buf_hl(bufnr)
 	-- Also adds a ▌ gutter bar (accept-tier only) so the two tiers are visually distinct.
 	if accepted then
 		if accept_status.new[filepath] then
-			hl_all_lines(bufnr, "GitCompareBufAcceptNew", 20, "GitCompareAcceptNewSign")
+			hl_all_lines(bufnr, "GitCompareBufAcceptNew", 20, "GitCompareBufAcceptNewSign")
 		else
 			for _, hunk in ipairs(gc.get_line_hunks(accepted, filepath)) do
 				local hl = hunk.kind == "new" and "GitCompareBufAcceptNew" or "GitCompareBufAcceptModified"
-				local sign_hl = hunk.kind == "new" and "GitCompareAcceptNewSign" or "GitCompareAcceptModifiedSign"
+				local sign_hl = hunk.kind == "new" and "GitCompareBufAcceptNewSign" or "GitCompareBufAcceptModifiedSign"
 				for _, lnum in ipairs(hunk.lines) do
 					pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, lnum - 1, 0, {
 						line_hl_group = hl,

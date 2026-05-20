@@ -504,10 +504,11 @@ function() return state.accept_dir_open end
 
 vim.schedule(function()
 M.refresh()
--- Restore the saved left-panel position after the tree has fully settled.
--- The nested vim.schedule gives nvim-tree one additional event-loop tick to
--- finish its own focus management before we override it.
-vim.schedule(function()
+-- Use defer_fn (150ms) instead of vim.schedule so the restore fires
+-- reliably AFTER nvim-tree finishes all its own async focus management.
+-- Two nested vim.schedule calls were not enough; nvim-tree re-grabs focus
+-- on a later event-loop tick.
+vim.defer_fn(function()
 local pos = _saved_left_pos
 if not pos then return end
 local target_win, target_buf
@@ -531,7 +532,7 @@ _last_left_win = target_win
 if pos.win_type == "origin" or pos.win_type == "accept" then
 pcall(vim.api.nvim_set_current_win, target_win)
 end
-end)
+end, 150)
 end)
 end
 
