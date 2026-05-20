@@ -532,13 +532,13 @@ function M.setup()
 		end,
 	})
 
-	-- Focus return: full invalidation, throttled to once per 10 s.
+	-- Focus return: full invalidation, throttled to once per 3 s.
 	local _last_focus = 0
 	vim.api.nvim_create_autocmd("FocusGained", {
 		group = augroup,
 		callback = function()
 			local now = (vim.uv or vim.loop).hrtime() / 1e9
-			if now - _last_focus < 10 then return end
+			if now - _last_focus < 3 then return end
 			_last_focus = now
 			schedule_refresh(function() require("git_compare").invalidate_all() end)
 		end,
