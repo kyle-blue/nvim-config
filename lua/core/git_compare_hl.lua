@@ -20,9 +20,9 @@ local function define_hl_groups()
 	vim.api.nvim_set_hl(0, "GitCompareAcceptNew", { bg = "#2f6330" })
 	vim.api.nvim_set_hl(0, "GitCompareAcceptModified", { bg = "#4a2500" })
 
-	vim.api.nvim_set_hl(0, "GitCompareBufOriginNew", { bg = "#121e12" })
+	vim.api.nvim_set_hl(0, "GitCompareBufOriginNew", { bg = "#182c18" })
 	vim.api.nvim_set_hl(0, "GitCompareBufOriginModified", { bg = "#241200" })
-	vim.api.nvim_set_hl(0, "GitCompareBufAcceptNew", { bg = "#182c18" })
+	vim.api.nvim_set_hl(0, "GitCompareBufAcceptNew", { bg = "#1d3d1d" })
 	vim.api.nvim_set_hl(0, "GitCompareBufAcceptModified", { bg = "#361a00" })
 
 	vim.api.nvim_set_hl(0, "GitCompareStatAdd", { fg = "#00ff44" })
@@ -200,17 +200,19 @@ local function build_buf_ranges(bufnr)
 	-- is never a zero-highlight frame; the provider uses new tables immediately.
 	_buf_ranges[bufnr] = { origin = origin_ranges, accept = accept_ranges }
 
-	-- Sign extmarks (▌) at range starts only — O(hunks), not O(changed_lines).
+	-- Sign extmarks (▌) for every line in each accept range.
 	local old_ids = _buf_mark_ids[bufnr] or {}
 	local new_ids = {}
 	for _, r in ipairs(accept_ranges) do
-		local ok, id = pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, r.s, 0, {
-			sign_text = "▌",
-			sign_hl_group = r.sign_hl,
-			priority = 20,
-		})
-		if ok then
-			new_ids[id] = true
+		for row = r.s, r.e do
+			local ok, id = pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row, 0, {
+				sign_text = "▌",
+				sign_hl_group = r.sign_hl,
+				priority = 20,
+			})
+			if ok then
+				new_ids[id] = true
+			end
 		end
 	end
 	for id in pairs(old_ids) do
