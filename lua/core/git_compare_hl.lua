@@ -60,24 +60,17 @@ local ns = vim.api.nvim_create_namespace("git_compare_hl")
 
 local _buf_hl_cache = {}  -- bufnr → hash string
 
-local function buf_hl_hash(bufnr, filepath, gen, origin_status, accept_status)
+local function buf_hl_hash(bufnr, filepath, file_gen, origin_status, accept_status)
 	local of = origin_status.new[filepath] and "on" or origin_status.modified[filepath] and "om" or ""
 	local af = (accept_status and accept_status.new[filepath]) and "an"
 		or (accept_status and accept_status.modified[filepath]) and "am" or ""
-	return gen .. ":" .. of .. ":" .. af .. ":" .. vim.api.nvim_buf_line_count(bufnr)
-end
-
-local function hl_all_lines(bufnr, hl_group, priority, sign_hl)
-	local count = vim.api.nvim_buf_line_count(bufnr)
-	for lnum = 0, count - 1 do
-		local opts = { line_hl_group = hl_group, priority = priority }
-		if sign_hl then opts.sign_text = "▌"; opts.sign_hl_group = sign_hl end
-		pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, lnum, 0, opts)
-	end
+	-- file_gen is per-file (not global) so only this file's hash changes on save.
+	return file_gen .. ":" .. of .. ":" .. af .. ":" .. vim.api.nvim_buf_line_count(bufnr)
 end
 
 -- Apply buffer highlights from cache.  Never calls git directly.
 -- Must be called after warm_async has completed.
+-- Uses set-new-then-delete-old so there is never a zero-highlight frame.
 local function apply_buf_hl_from_cache(bufnr)
 	if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then return end
 	if vim.bo[bufnr].buftype ~= "" then return end
@@ -90,20 +83,31 @@ local function apply_buf_hl_from_cache(bufnr)
 	local origin_status = gc.get_file_status(origin)
 	local accept_status = gc.get_file_status(accepted)
 
-	local hash = buf_hl_hash(bufnr, filepath, gc.get_invalidation_gen(), origin_status, accept_status)
+	local hash = buf_hl_hash(bufnr, filepath, gc.get_file_gen(filepath), origin_status, accept_status)
 	if _buf_hl_cache[bufnr] == hash then return end
 	_buf_hl_cache[bufnr] = hash
 
-	vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+	-- Collect old extmark IDs before applying new ones.
+	local old_marks = vim.api.nvim_buf_get_extmarks(bufnr, ns, 0, -1, {})
+
+	-- Apply all new extmarks first (old ones remain visible in the meantime).
+	local new_ids = {}
+	local function set(lnum, opts)
+		local ok, id = pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, lnum, 0, opts)
+		if ok then new_ids[id] = true end
+	end
 
 	if origin then
 		if origin_status.new[filepath] then
-			hl_all_lines(bufnr, "GitCompareBufOriginNew", 10)
+			local count = vim.api.nvim_buf_line_count(bufnr)
+			for lnum = 0, count - 1 do
+				set(lnum, { line_hl_group = "GitCompareBufOriginNew", priority = 10 })
+			end
 		else
 			for _, hunk in ipairs(gc.get_line_hunks(origin, filepath)) do
 				local hl = hunk.kind == "new" and "GitCompareBufOriginNew" or "GitCompareBufOriginModified"
 				for _, lnum in ipairs(hunk.lines) do
-					pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, lnum - 1, 0, { line_hl_group = hl, priority = 10 })
+					set(lnum - 1, { line_hl_group = hl, priority = 10 })
 				end
 			end
 		end
@@ -111,18 +115,27 @@ local function apply_buf_hl_from_cache(bufnr)
 
 	if accepted then
 		if accept_status.new[filepath] then
-			hl_all_lines(bufnr, "GitCompareBufAcceptNew", 20, "GitCompareBufAcceptNewSign")
+			local count = vim.api.nvim_buf_line_count(bufnr)
+			for lnum = 0, count - 1 do
+				set(lnum, { line_hl_group = "GitCompareBufAcceptNew", priority = 20,
+					sign_text = "▌", sign_hl_group = "GitCompareBufAcceptNewSign" })
+			end
 		else
 			for _, hunk in ipairs(gc.get_line_hunks(accepted, filepath)) do
-				local hl      = hunk.kind == "new" and "GitCompareBufAcceptNew"         or "GitCompareBufAcceptModified"
-				local sign_hl = hunk.kind == "new" and "GitCompareBufAcceptNewSign" or "GitCompareBufAcceptModifiedSign"
+				local hl      = hunk.kind == "new" and "GitCompareBufAcceptNew"      or "GitCompareBufAcceptModified"
+				local sign_hl = hunk.kind == "new" and "GitCompareBufAcceptNewSign"  or "GitCompareBufAcceptModifiedSign"
 				for _, lnum in ipairs(hunk.lines) do
-					pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, lnum - 1, 0, {
-						line_hl_group = hl, priority = 20,
-						sign_text = "▌", sign_hl_group = sign_hl,
-					})
+					set(lnum - 1, { line_hl_group = hl, priority = 20,
+						sign_text = "▌", sign_hl_group = sign_hl })
 				end
 			end
+		end
+	end
+
+	-- Delete only the old extmarks that weren't just replaced.
+	for _, mark in ipairs(old_marks) do
+		if not new_ids[mark[1]] then
+			pcall(vim.api.nvim_buf_del_extmark, bufnr, ns, mark[1])
 		end
 	end
 end
@@ -147,7 +160,7 @@ local function apply_buf_hl(bufnr)
 	-- Fast path: hash tells us nothing has changed.
 	local origin_status = gc.get_file_status(origin)
 	local accept_status = gc.get_file_status(accepted)
-	local hash = buf_hl_hash(bufnr, filepath, gc.get_invalidation_gen(), origin_status, accept_status)
+	local hash = buf_hl_hash(bufnr, filepath, gc.get_file_gen(filepath), origin_status, accept_status)
 	if _buf_hl_cache[bufnr] == hash then return end
 
 	-- Need hunks for modified files – warm async, apply when ready.
@@ -182,8 +195,13 @@ end
 -- ── Debounced refresh coordinator ────────────────────────────────────────────
 -- All event callbacks funnel here.  Debounced at 400 ms so rapid consecutive
 -- events (save → watcher → focus) collapse into a single refresh pass.
+--
+-- invalidate_fn is called LAZILY inside the timer callback (not immediately) so
+-- file_status is never blank during the debounce window — old highlights remain
+-- visible until the new git data is ready.
 
 local _refresh_timer = nil
+local _pending_invalidations = {}  -- collected lazily until timer fires
 
 local function schedule_refresh(invalidate_fn)
 	local uv = vim.uv or vim.loop
@@ -191,11 +209,19 @@ local function schedule_refresh(invalidate_fn)
 		pcall(function() _refresh_timer:stop(); _refresh_timer:close() end)
 		_refresh_timer = nil
 	end
-	if invalidate_fn then invalidate_fn() end
+	if invalidate_fn then table.insert(_pending_invalidations, invalidate_fn) end
 	_refresh_timer = uv.new_timer()
 	_refresh_timer:start(400, 0, vim.schedule_wrap(function()
 		_refresh_timer = nil
+		-- Run all queued invalidations right before the fetch begins.
+		local fns = _pending_invalidations
+		_pending_invalidations = {}
+		for _, fn in ipairs(fns) do fn() end
 		local gc = require("git_compare")
+		-- Flush stale file-status caches (preserves origin_commit — no extra git spawn).
+		-- Callers that need a full reset (invalidate_all, HEAD change) already cleared
+		-- origin_commit inside their invalidation function above.
+		gc.flush_file_status_caches()
 		gc.warm_async(function()
 			refresh_visible_bufs()
 			-- Reload the tree (triggers TreeRendered which reapplies extmarks).

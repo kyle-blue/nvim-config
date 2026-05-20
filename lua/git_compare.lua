@@ -21,6 +21,7 @@ local _cache = {
 	line_hunks       = {},  -- ["sha:filepath"] = [{lines,kind}]
 	diff_stats       = {},  -- ["all:commit"] = {[abs]=a/r}, ["commit:stat:path"] = {a,r}
 	_gen             = 0,
+	_file_gens       = {},  -- [filepath] = N  (per-file version; bumped by invalidate_file only)
 }
 
 local CACHE_TTL = 30  -- seconds before re-fetching origin commit
@@ -316,11 +317,17 @@ end
 -- ── Public: warm the cache asynchronously ────────────────────────────────────
 -- Ensures origin commit + both file-statuses are loaded, then calls callback().
 -- If everything is already cached the callback fires in the same tick.
--- Pass force=true to re-fetch even if cache appears warm (used after invalidation).
+-- Pass force=true to flush stale file-status caches and re-fetch from git.
 function M.warm_async(callback, force)
 	if force then
-		_cache.origin_commit = nil
+		_cache.origin_commit    = nil
 		_cache.origin_commit_at = 0
+		-- Flush file-status caches so fetch_file_status_async won't early-exit.
+		_cache.file_status = {}
+		_cache.file_list   = {}
+		_cache.dir_index   = {}
+		_cache.diff_stats  = {}
+		_pending = {}
 	end
 	fetch_origin_async(function(origin)
 		local accepted = M.get_accepted_commit()
@@ -509,9 +516,16 @@ function M.get_invalidation_gen()
 	return _cache._gen
 end
 
+-- Per-file gen: changes only when THIS specific file is invalidated.
+-- buf_hl_hash should use this so that saving file A doesn't stale file B's cache.
+function M.get_file_gen(filepath)
+	return _cache._gen .. ":" .. (_cache._file_gens[filepath] or 0)
+end
+
 -- Full invalidation: clears everything except git_root (session-constant).
 function M.invalidate_all()
 	_cache._gen             = _cache._gen + 1
+	_cache._file_gens       = {}
 	_cache.origin_commit    = nil
 	_cache.origin_commit_at = 0
 	-- git_root intentionally kept: it never changes within a session.
@@ -525,19 +539,33 @@ function M.invalidate_all()
 end
 
 -- Partial invalidation for a single file (BufWritePost).
+-- Only bumps the per-file gen; the global gen (and therefore all other buffers'
+-- hashes) is unaffected.  File-status caches are left intact so any
+-- apply_buf_hl_from_cache call between now and the next warm_async still sees
+-- the previous (possibly slightly stale but never blank) highlights.
+-- The caller's schedule_refresh() will force-flush file_status inside
+-- warm_async(force=true) immediately before re-fetching.
 function M.invalidate_file(filepath)
-	_cache._gen = _cache._gen + 1
-	-- File sets and dir indexes must be rebuilt (file membership may have changed).
-	_cache.file_status = {}
-	_cache.file_list   = {}
-	_cache.dir_index   = {}
-	_cache.diff_stats  = {}
-	-- Drop hunk cache only for the affected file.
+	_cache._file_gens[filepath] = (_cache._file_gens[filepath] or 0) + 1
+	-- Drop only the hunk cache for this specific file (not all hunks).
 	for key in pairs(_cache.line_hunks) do
 		if filepath and key:find(filepath, 1, true) then
 			_cache.line_hunks[key] = nil
 		end
 	end
+	-- NOTE: file_status / file_list / dir_index / diff_stats are intentionally
+	-- NOT cleared here.  They are flushed lazily inside flush_file_status_caches()
+	-- when the debounce timer fires, which avoids a blank-flash window.
+end
+
+-- Flush only the file-status-derived caches (not origin_commit).
+-- Called lazily from schedule_refresh right before warm_async, so the window
+-- between "cache empty" and "git data available" is as short as possible.
+function M.flush_file_status_caches()
+	_cache.file_status = {}
+	_cache.file_list   = {}
+	_cache.dir_index   = {}
+	_cache.diff_stats  = {}
 	_pending = {}
 end
 
