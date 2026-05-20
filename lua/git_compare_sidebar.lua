@@ -468,6 +468,8 @@ state.origin_buf = nil
 state.accept_buf = nil
 state.origin_node_data = {}
 state.accept_node_data = {}
+-- Force full re-render next time panels are created (fresh empty buffers).
+_sidebar_hash = { origin = "", accept = "" }
 -- _saved_left_pos is intentionally kept so the next open can restore it.
 _last_left_win = nil
 end
