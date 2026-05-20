@@ -52,6 +52,21 @@ end
 
 local ns = vim.api.nvim_create_namespace("git_compare_hl")
 
+-- Per-buffer cache: skip clear+reapply if highlights haven't changed.
+-- Key: bufnr → "gen:origin_flag:accept_flag:linecount"
+-- Bumped whenever gc.invalidate_* is called (gen changes) or line count changes.
+local _buf_hl_cache = {}
+
+local function buf_hl_hash(bufnr, filepath, gen, origin_status, accept_status)
+	local of = origin_status.new[filepath] and "on"
+		or origin_status.modified[filepath] and "om"
+		or ""
+	local af = (accept_status and accept_status.new[filepath]) and "an"
+		or (accept_status and accept_status.modified[filepath]) and "am"
+		or ""
+	return gen .. ":" .. of .. ":" .. af .. ":" .. vim.api.nvim_buf_line_count(bufnr)
+end
+
 -- Apply all-line highlight for a file that is entirely new (untracked or added).
 local function hl_all_lines(bufnr, hl_group, priority)
 	local count = vim.api.nvim_buf_line_count(bufnr)
@@ -67,7 +82,6 @@ local function apply_buf_hl(bufnr)
 	if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
 		return
 	end
-	-- Only highlight normal file buffers.
 	if vim.bo[bufnr].buftype ~= "" then
 		return
 	end
@@ -76,15 +90,21 @@ local function apply_buf_hl(bufnr)
 		return
 	end
 
-	vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
-
 	local gc = require("git_compare")
 	local origin = gc.get_origin_commit()
 	local accepted = gc.get_accepted_commit()
-
-	-- Pre-fetch status so we can check per-file "new" flag.
 	local origin_status = gc.get_file_status(origin)
 	local accept_status = gc.get_file_status(accepted)
+
+	-- Skip clear+reapply entirely if nothing has changed since last apply.
+	-- This eliminates the two-frame flash caused by clear → render → apply.
+	local hash = buf_hl_hash(bufnr, filepath, gc.get_invalidation_gen(), origin_status, accept_status)
+	if _buf_hl_cache[bufnr] == hash then
+		return
+	end
+	_buf_hl_cache[bufnr] = hash
+
+	vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
 
 	-- Origin layer – priority 10.
 	-- If the file is entirely new (untracked or added since origin), highlight every
@@ -275,19 +295,19 @@ local function watch_file(path)
 	end
 end
 
--- Set up fs watchers for the git index and HEAD so changes made by external
--- tools (e.g. Copilot) are reflected automatically.
+-- Set up a fs watcher on .git/HEAD only (branch switches, commits).
+-- We deliberately skip .git/index: it changes on every git read-lock and
+-- would fire dozens of times per minute under normal usage, causing constant
+-- full refreshes and cursor flicker.
 local function setup_git_watchers()
 	local git_dir = vim.trim(vim.fn.system("git rev-parse --git-dir 2>/dev/null"))
 	if vim.v.shell_error ~= 0 or git_dir == "" then
 		return
 	end
-	-- Resolve to absolute path if relative.
 	if git_dir:sub(1, 1) ~= "/" then
 		git_dir = vim.fn.getcwd() .. "/" .. git_dir
 	end
-	watch_file(git_dir .. "/index") -- changes on stage/unstage
-	watch_file(git_dir .. "/HEAD") -- changes on commit / checkout
+	watch_file(git_dir .. "/HEAD") -- fires on commit / branch checkout
 end
 
 function M.setup()
@@ -344,10 +364,18 @@ function M.setup()
 		end,
 	})
 
-	-- On focus return, drop all caches (index may have changed) and repaint.
+	-- On focus return, drop all caches and repaint.  Limit to one full refresh
+	-- per 5 seconds to prevent rapid invalidations when switching windows.
+	local _last_focus_invalidation = 0
 	vim.api.nvim_create_autocmd("FocusGained", {
 		group = augroup,
 		callback = function()
+			local now = vim.uv and vim.uv.hrtime() or vim.loop.hrtime()
+			now = now / 1e9 -- convert ns → seconds
+			if now - _last_focus_invalidation < 5 then
+				return
+			end
+			_last_focus_invalidation = now
 			vim.schedule(function()
 				require("git_compare").invalidate_all()
 				refresh_all_bufs()
@@ -359,8 +387,9 @@ function M.setup()
 		end,
 	})
 
-	-- For new (untracked) files: re-apply highlight as lines are added so the
-	-- coverage always matches the current line count.
+	-- For new (untracked) files: re-apply highlight as lines are added.
+	-- Debounce per-buffer at 300 ms to avoid firing on every keystroke.
+	local _text_changed_timers = {}
 	vim.api.nvim_create_autocmd({ "TextChanged", "InsertLeave" }, {
 		group = augroup,
 		callback = function(ev)
@@ -374,24 +403,49 @@ function M.setup()
 			end
 			local gc = require("git_compare")
 			local os = gc.get_file_status(gc.get_origin_commit())
-			if os.new[fp] then
-				vim.schedule(function()
-					apply_buf_hl(bufnr)
-				end)
+			if not os.new[fp] then
+				return
 			end
+			-- Cancel previous timer for this buffer (if any).
+			if _text_changed_timers[bufnr] then
+				pcall(function()
+					_text_changed_timers[bufnr]:stop()
+					_text_changed_timers[bufnr]:close()
+				end)
+				_text_changed_timers[bufnr] = nil
+			end
+			local uv = vim.uv or vim.loop
+			local t = uv.new_timer()
+			_text_changed_timers[bufnr] = t
+			t:start(300, 0, vim.schedule_wrap(function()
+				pcall(function()
+					t:stop()
+					t:close()
+				end)
+				_text_changed_timers[bufnr] = nil
+				-- Invalidate this file so hash changes and apply_buf_hl runs.
+				gc.invalidate_file(fp)
+				apply_buf_hl(bufnr)
+			end))
 		end,
 	})
 
-	-- :Accept – snapshot the CURRENT working-tree state (including uncommitted
-	-- changes) as the accepted baseline.  Uses "git stash create" to build a
-	-- temporary commit that captures both the index and the working tree without
-	-- touching any refs.  Falls back to HEAD when the working tree is clean.
+	-- :Accept – snapshot the CURRENT working-tree state as the accepted baseline.
+	-- Stores the snapshot under refs/nvim-accept/baseline so it:
+	--   • is never GC'd (it's a named ref)
+	--   • never appears in `git stash list` (not on refs/stash)
+	--   • automatically replaces the previous baseline on the next :Accept
 	vim.api.nvim_create_user_command("Accept", function()
-		-- Try to capture a stash commit that represents the full working-tree state.
+		-- Delete any previous baseline ref so the old stash object can eventually GC.
+		vim.fn.system("git update-ref -d refs/nvim-accept/baseline 2>/dev/null")
+
+		-- Build a snapshot commit of the current working tree + index.
 		local stash_sha = vim.trim(vim.fn.system("git stash create 2>/dev/null"))
 		local commit
 		if vim.v.shell_error == 0 and stash_sha ~= "" then
-			commit = stash_sha -- captures staged + unstaged tracked changes
+			-- Park the stash object under our private ref so it won't be GC'd.
+			vim.fn.system("git update-ref refs/nvim-accept/baseline " .. stash_sha)
+			commit = stash_sha
 		else
 			-- Working tree is clean; HEAD is the correct baseline.
 			commit = vim.trim(vim.fn.system("git rev-parse HEAD 2>/dev/null"))
@@ -399,7 +453,9 @@ function M.setup()
 				vim.notify("Accept: not in a git repository", vim.log.levels.ERROR)
 				return
 			end
+			vim.fn.system("git update-ref refs/nvim-accept/baseline " .. commit)
 		end
+
 		local gc = require("git_compare")
 		gc.set_accepted_commit(commit)
 		gc.invalidate_all()

@@ -13,6 +13,7 @@ local _cache = {
 	file_status = {}, -- [commit_sha] = { new = {abs: true}, modified = {abs: true} }
 	file_list = {}, -- [commit_sha] = { new = {abs_path}, modified = {abs_path} } – files only, no dirs
 	line_hunks = {}, -- ["sha:filepath"] = [{ lines = {lnums}, kind = "new"|"modified" }]
+	_gen = 0, -- incremented on any invalidation; used by hl cache to detect staleness
 }
 
 local CACHE_TTL = 30 -- seconds before re-running git commands
@@ -313,8 +314,15 @@ end
 
 -- Cache invalidation ---------------------------------------------------------
 
+-- Returns a monotonically increasing counter; bumped on every invalidation.
+-- Used by git_compare_hl to avoid redundant clear+reapply of extmarks.
+function M.get_invalidation_gen()
+	return _cache._gen
+end
+
 -- Full invalidation (e.g. on FocusGained or after :Accept).
 function M.invalidate_all()
+	_cache._gen = _cache._gen + 1
 	_cache.origin_commit = nil
 	_cache.origin_commit_at = 0
 	_cache.git_root = nil
@@ -325,6 +333,7 @@ end
 
 -- Partial invalidation for a single file (e.g. on BufWritePost).
 function M.invalidate_file(filepath)
+	_cache._gen = _cache._gen + 1
 	_cache.file_status = {} -- file sets are per-commit, easier to wipe all
 	_cache.file_list = {}
 	for key in pairs(_cache.line_hunks) do
