@@ -481,6 +481,7 @@ local function attach_keymaps(bufnr, panel_type, get_node_data, get_dir_open)
 	local opts = { buffer = bufnr, noremap = true, silent = true }
 	vim.keymap.set("n", "<CR>", on_activate, opts)
 	vim.keymap.set("n", "o", on_activate, opts)
+	vim.keymap.set("n", "<LeftMouse>", on_activate, opts)
 
 	-- Track cursor position continuously so it can be restored after tree reopen.
 	-- Also enforces the header-skip rule (cursor must not rest on line 1).
