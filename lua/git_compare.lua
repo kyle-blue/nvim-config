@@ -13,6 +13,7 @@ local M = {}
 
 local _cache = {
 	git_root         = nil,      -- session-constant: never cleared on invalidation
+	git_dir          = nil,      -- session-constant: for accept_file path
 	origin_commit    = nil,
 	origin_commit_at = 0,
 	file_status      = {},  -- [commit] = {new={},modified={},deleted={}}
@@ -61,6 +62,17 @@ local function git_root_sync()
 	if vim.v.shell_error ~= 0 then return nil end
 	_cache.git_root = vim.trim(r)
 	return _cache.git_root
+end
+
+local function git_dir_sync()
+	if _cache.git_dir then return _cache.git_dir end
+	local r = vim.fn.system("git rev-parse --git-dir 2>/dev/null")
+	if vim.v.shell_error ~= 0 then return nil end
+	local gd = vim.trim(r)
+	if gd == "" then return nil end
+	if gd:sub(1, 1) ~= "/" then gd = vim.fn.getcwd() .. "/" .. gd end
+	_cache.git_dir = gd
+	return _cache.git_dir
 end
 
 -- Non-blocking git command.  callback(stdout_or_nil) runs on the main thread.
@@ -412,6 +424,30 @@ end
 
 -- ── Line hunks ────────────────────────────────────────────────────────────────
 
+-- Convert a sorted list of 1-indexed line numbers into contiguous 0-indexed
+-- ranges [{s, e}, ...].  One range extmark covers the whole block instead of
+-- one line_hl_group extmark per line — the core Phase-1 performance win.
+local function lines_to_ranges(lines)
+	if #lines == 0 then return {} end
+	local ranges = {}
+	local s = lines[1] - 1  -- 1-indexed → 0-indexed
+	local e = s
+	for i = 2, #lines do
+		local c = lines[i] - 1
+		if c == e + 1 then
+			e = c
+		else
+			table.insert(ranges, { s = s, e = e })
+			s, e = c, c
+		end
+	end
+	table.insert(ranges, { s = s, e = e })
+	return ranges
+end
+
+-- Parse raw `git diff` output into hunk descriptors.
+-- Each hunk: { ranges=[{s,e},...], kind="new"|"modified" }
+-- ranges are 0-indexed, contiguous, ready for range extmarks.
 local function parse_hunks(diff)
 	local hunks = {}
 	local cur = nil
@@ -420,6 +456,8 @@ local function parse_hunks(diff)
 		if ns then
 			if cur and #cur.lines > 0 then
 				cur.kind = (cur.has_added and cur.has_removed) and "modified" or "new"
+				cur.ranges = lines_to_ranges(cur.lines)
+				cur.lines = nil
 				table.insert(hunks, cur)
 			end
 			cur = { lines = {}, has_added = false, has_removed = false, lnum = tonumber(ns) }
@@ -436,6 +474,8 @@ local function parse_hunks(diff)
 	end
 	if cur and #cur.lines > 0 then
 		cur.kind = (cur.has_added and cur.has_removed) and "modified" or "new"
+		cur.ranges = lines_to_ranges(cur.lines)
+		cur.lines = nil
 		table.insert(hunks, cur)
 	end
 	return hunks
@@ -490,8 +530,8 @@ end
 -- ── Accepted commit persistence ───────────────────────────────────────────────
 
 local function accept_file()
-	local gd = vim.trim(vim.fn.system("git rev-parse --git-dir 2>/dev/null"))
-	if vim.v.shell_error ~= 0 or gd == "" then return nil end
+	local gd = git_dir_sync()
+	if not gd then return nil end
 	return gd .. "/nvim_accept_commit"
 end
 
