@@ -54,9 +54,8 @@ return {
 			-- 2. Setup Formatters and Linters to auto-install
 			require("mason-tool-installer").setup({
 				ensure_installed = {
-					"prettier",
+					"biome",
 					"stylua",
-					"eslint_d",
 				},
 			})
 
