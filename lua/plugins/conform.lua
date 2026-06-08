@@ -15,13 +15,13 @@ return {
 	opts = {
 		formatters_by_ft = {
 			lua = { "stylua" },
-			javascript = { "prettier" },
-			typescript = { "prettier" },
-			javascriptreact = { "prettier" },
-			typescriptreact = { "prettier" },
-			json = { "prettier" },
-			html = { "prettier" },
-			css = { "prettier" },
+			javascript = { "biome" },
+			typescript = { "biome" },
+			javascriptreact = { "biome" },
+			typescriptreact = { "biome" },
+			json = { "biome" },
+			html = { "biome" },
+			css = { "biome" },
 			-- Go and Rust don't need external formatters here; Conform will
 			-- automatically fall back to gopls and rust_analyzer!
 		},
