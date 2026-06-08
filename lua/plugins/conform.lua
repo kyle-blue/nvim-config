@@ -15,21 +15,15 @@ return {
 	opts = {
 		formatters_by_ft = {
 			lua = { "stylua" },
-			javascript = { "biome" },
-			typescript = { "biome" },
-			javascriptreact = { "biome" },
-			typescriptreact = { "biome" },
-			json = { "biome" },
-			html = { "biome" },
-			css = { "biome" },
-			-- Go and Rust don't need external formatters here; Conform will
-			-- automatically fall back to gopls and rust_analyzer!
+			-- JS/TS/JSON/CSS/HTML: biome LSP (auto-enabled by mason-lspconfig)
+			-- handles formatting via lsp_format = "fallback" below.
+			-- Go and Rust fall back to gopls and rust_analyzer the same way.
 		},
 		format_on_save = function(bufnr)
 			if vim.g.disable_autoformat or vim.b[bufnr].disable_autoformat then
 				return
 			end
-			return { timeout_ms = 500, lsp_format = "fallback" }
+			return { timeout_ms = 2000, lsp_format = "fallback" }
 		end,
 	},
 	init = function()
