@@ -22,7 +22,7 @@ return {
 			json = { "biome" },
 			jsonc = { "biome" },
 			css = { "biome" },
-			-- svelte: handled by svelteserver via lsp_format fallback
+			svelte = { "biome" },
 			-- Go and Rust fall back to gopls/rust_analyzer via lsp_format fallback
 		},
 		format_on_save = function(bufnr)
