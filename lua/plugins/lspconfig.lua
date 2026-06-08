@@ -24,6 +24,16 @@ return {
 				pyright = {
 					settings = { pyright = { disableOrganizeImports = true } },
 				},
+				biome = {
+					-- Remove svelte from biome's filetypes: biome ignores .svelte files and
+					-- its LSP otherwise times out on save (svelteserver handles .svelte instead).
+					filetypes = {
+						"astro", "css", "graphql",
+						"javascript", "javascriptreact",
+						"json", "jsonc",
+						"typescript", "typescriptreact", "typescript.tsx",
+					},
+				},
 				lua_ls = {
 					settings = {
 						Lua = {

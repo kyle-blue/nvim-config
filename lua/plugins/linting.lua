@@ -5,12 +5,8 @@ return {
 		local lint = require("lint")
 
 		-- Map filetypes to linters
-		lint.linters_by_ft = {
-			javascript = { "biomejs" },
-			typescript = { "biomejs" },
-			javascriptreact = { "biomejs" },
-			typescriptreact = { "biomejs" },
-		}
+		-- biome LSP provides diagnostics for JS/TS; nvim-lint not needed for biome.
+		lint.linters_by_ft = {}
 
 		-- Create an autocommand to trigger linting
 		local lint_augroup = vim.api.nvim_create_augroup("lint", { clear = true })
