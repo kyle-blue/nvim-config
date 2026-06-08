@@ -15,15 +15,21 @@ return {
 	opts = {
 		formatters_by_ft = {
 			lua = { "stylua" },
-			-- JS/TS/JSON/CSS/HTML: biome LSP (auto-enabled by mason-lspconfig)
-			-- handles formatting via lsp_format = "fallback" below.
-			-- Go and Rust fall back to gopls and rust_analyzer the same way.
+			javascript = { "biome" },
+			typescript = { "biome" },
+			javascriptreact = { "biome" },
+			typescriptreact = { "biome" },
+			json = { "biome" },
+			jsonc = { "biome" },
+			css = { "biome" },
+			-- svelte: handled by svelteserver via lsp_format fallback
+			-- Go and Rust fall back to gopls/rust_analyzer via lsp_format fallback
 		},
 		format_on_save = function(bufnr)
 			if vim.g.disable_autoformat or vim.b[bufnr].disable_autoformat then
 				return
 			end
-			return { timeout_ms = 2000, lsp_format = "fallback" }
+			return { timeout_ms = 500, lsp_format = "fallback" }
 		end,
 	},
 	init = function()
