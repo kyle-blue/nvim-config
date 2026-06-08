@@ -15,14 +15,14 @@ return {
 	opts = {
 		formatters_by_ft = {
 			lua = { "stylua" },
-			javascript = { "biome" },
-			typescript = { "biome" },
-			javascriptreact = { "biome" },
-			typescriptreact = { "biome" },
-			json = { "biome" },
-			jsonc = { "biome" },
-			css = { "biome" },
-			svelte = { "biome" },
+			javascript = { "biome-check" },
+			typescript = { "biome-check" },
+			javascriptreact = { "biome-check" },
+			typescriptreact = { "biome-check" },
+			json = { "biome-check" },
+			jsonc = { "biome-check" },
+			css = { "biome-check" },
+			svelte = { "biome-check" },
 			-- Go and Rust fall back to gopls/rust_analyzer via lsp_format fallback
 		},
 		format_on_save = function(bufnr)
