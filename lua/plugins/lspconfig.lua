@@ -24,15 +24,7 @@ return {
 				pyright = {
 					settings = { pyright = { disableOrganizeImports = true } },
 				},
-				biome = {
-					filetypes = {
-						"astro", "css", "graphql",
-						"javascript", "javascriptreact",
-						"json", "jsonc",
-						"svelte",
-						"typescript", "typescriptreact", "typescript.tsx",
-					},
-				},
+				biome = {},
 				lua_ls = {
 					settings = {
 						Lua = {
@@ -63,7 +55,6 @@ return {
 			-- 2. Setup Formatters and Linters to auto-install
 			require("mason-tool-installer").setup({
 				ensure_installed = {
-					"biome",
 					"stylua",
 				},
 			})
