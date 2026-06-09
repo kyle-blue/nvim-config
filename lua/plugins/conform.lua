@@ -22,7 +22,6 @@ return {
 			json = { "biome-check" },
 			jsonc = { "biome-check" },
 			css = { "biome-check" },
-			svelte = { "biome-check" },
 			-- Go and Rust fall back to gopls/rust_analyzer via lsp_format fallback
 		},
 		format_on_save = function(bufnr)
