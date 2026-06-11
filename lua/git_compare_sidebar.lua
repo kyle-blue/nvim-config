@@ -502,6 +502,10 @@ end
 
 -- ── Window management ─────────────────────────────────────────────────────────
 
+function M.open_panels()
+	create_panels()
+end
+
 function M.close_panels()
 	for _, k in ipairs({ "origin_win", "accept_win" }) do
 		if state[k] and vim.api.nvim_win_is_valid(state[k]) then

@@ -33,6 +33,9 @@ end
 ---@param node nvim_tree.api.Node
 ---@return string? highlight_group
 function GitCompareDecorator:highlight_group(node)
+	if not require("core.git_compare_hl").enabled then
+		return nil
+	end
 	local abs = node.absolute_path
 	if not abs then
 		return nil
