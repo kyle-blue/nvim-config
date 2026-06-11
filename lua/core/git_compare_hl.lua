@@ -12,6 +12,8 @@
 
 local M = {}
 
+M.enabled = true
+
 -- ── Highlight group definitions ──────────────────────────────────────────────
 
 local function define_hl_groups()
@@ -139,6 +141,9 @@ end
 --          (zero stored background extmarks); signs remain regular extmarks.
 -- Never calls git directly; must be called after warm_async has completed.
 local function build_buf_ranges(bufnr)
+	if not M.enabled then
+		return
+	end
 	if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
 		return
 	end
@@ -234,6 +239,9 @@ end
 -- Warms line-hunks for the current file then applies highlights.
 -- Completely non-blocking.
 local function apply_buf_hl(bufnr)
+	if not M.enabled then
+		return
+	end
 	if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
 		return
 	end
@@ -427,6 +435,11 @@ local function setup_tree_hl()
 	tree_api.events.subscribe(tree_api.events.Event.TreeRendered, function(data)
 		local bufnr = data and data.bufnr
 		if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+			return
+		end
+
+		if not M.enabled then
+			vim.api.nvim_buf_clear_namespace(bufnr, tree_ns, 0, -1)
 			return
 		end
 
@@ -719,6 +732,61 @@ function M.setup()
 			refresh_visible_bufs()
 		end)
 	end)
+
+	vim.api.nvim_create_user_command("DiffToggle", function()
+		M.enabled = not M.enabled
+
+		if not M.enabled then
+			-- Clear buffer highlights and sign extmarks for all loaded buffers.
+			for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+				if vim.api.nvim_buf_is_valid(bufnr) then
+					for id in pairs(_buf_mark_ids[bufnr] or {}) do
+						pcall(vim.api.nvim_buf_del_extmark, bufnr, ns, id)
+					end
+					_buf_mark_ids[bufnr] = {}
+					_buf_ranges[bufnr] = nil
+					_buf_hl_cache[bufnr] = nil
+					pcall(vim.api.nvim__redraw, { buf = bufnr, valid = false })
+				end
+			end
+			-- Clear nvim-tree row highlights and reset sign column.
+			for _, win in ipairs(vim.api.nvim_list_wins()) do
+				local bufnr = vim.api.nvim_win_get_buf(win)
+				if vim.bo[bufnr].filetype == "NvimTree" then
+					vim.api.nvim_buf_clear_namespace(bufnr, tree_ns, 0, -1)
+					pcall(function()
+						vim.wo[win].signcolumn = "no"
+					end)
+					break
+				end
+			end
+			-- Close sidebar panels.
+			pcall(function()
+				require("git_compare_sidebar").close_panels()
+			end)
+			vim.notify("Diff highlights: off", vim.log.levels.INFO)
+		else
+			-- Restore sign column on the tree window.
+			for _, win in ipairs(vim.api.nvim_list_wins()) do
+				local bufnr = vim.api.nvim_win_get_buf(win)
+				if vim.bo[bufnr].filetype == "NvimTree" then
+					pcall(function()
+						vim.wo[win].signcolumn = "yes:1"
+					end)
+					break
+				end
+			end
+			-- Reopen sidebar panels if nvim-tree is visible.
+			pcall(function()
+				require("git_compare_sidebar").open_panels()
+			end)
+			-- Re-apply all highlights.
+			schedule_refresh(function()
+				require("git_compare").invalidate_all()
+			end)
+			vim.notify("Diff highlights: on", vim.log.levels.INFO)
+		end
+	end, { desc = "Toggle git comparison highlights and sidebar panels" })
 end
 
 return M
