@@ -9,6 +9,7 @@ return {
 					"c",
 					"diff",
 					"html",
+					"java",
 					"lua",
 					"luadoc",
 					"markdown",
