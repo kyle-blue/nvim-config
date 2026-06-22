@@ -56,6 +56,10 @@ return {
 			require("mason-tool-installer").setup({
 				ensure_installed = {
 					"stylua",
+					-- Java: jdtls is the LSP; the other two add DAP and test running support
+					"jdtls",
+					"java-debug-adapter",
+					"java-test",
 				},
 			})
 
