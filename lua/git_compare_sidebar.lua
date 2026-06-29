@@ -19,6 +19,11 @@
 
 local M = {}
 
+-- Whether the diff sidebar panels are allowed to exist.  Toggled by :DiffToggle
+-- (via disable_panels/open_panels).  The TreeOpen handler honours this so panels
+-- stay gone across nvim-tree close/reopen cycles while diffing is off.
+M.enabled = true
+
 local sidebar_ns = vim.api.nvim_create_namespace("git_compare_sidebar")
 
 -- Maps row hl group → tint suffix for combined stat+bg highlight groups.
@@ -502,8 +507,21 @@ end
 
 -- ── Window management ─────────────────────────────────────────────────────────
 
+-- Forward declaration so M.open_panels (defined before create_panels) captures
+-- the local as an upvalue rather than a nil global.
+local create_panels
+
 function M.open_panels()
+	M.enabled = true
 	create_panels()
+end
+
+-- Hide panels and keep them hidden across tree open/close cycles until the next
+-- :DiffToggle on.  Distinct from close_panels(), which is a transient teardown
+-- used on TreeClose where the panels are expected to come back on TreeOpen.
+function M.disable_panels()
+	M.enabled = false
+	M.close_panels()
 end
 
 function M.close_panels()
@@ -526,7 +544,7 @@ end
 -- Open two panel windows below nvim-tree, CONFINED to the tree column.
 -- Uses nvim_open_win with win= (Neovim 0.10+) so the splits never escape the
 -- tree column and never push the global statusline.
-local function create_panels()
+function create_panels()
 	local tree_win = find_tree_win()
 	if not tree_win then
 		return
@@ -643,6 +661,9 @@ function M.setup()
 	end
 
 	tree_api.events.subscribe(tree_api.events.Event.TreeOpen, function()
+		if not M.enabled then
+			return
+		end
 		vim.schedule(create_panels)
 	end)
 

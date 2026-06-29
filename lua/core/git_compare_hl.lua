@@ -418,6 +418,9 @@ local function setup_tree_hl()
 
 	-- Set sign column once when the tree opens; not on every render.
 	tree_api.events.subscribe(tree_api.events.Event.TreeOpen, function(data)
+		if not M.enabled then
+			return
+		end
 		vim.schedule(function()
 			local bufnr = data and data.bufnr
 			for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -760,9 +763,9 @@ function M.setup()
 					break
 				end
 			end
-			-- Close sidebar panels.
+			-- Disable sidebar panels (kept hidden across tree open/close cycles).
 			pcall(function()
-				require("git_compare_sidebar").close_panels()
+				require("git_compare_sidebar").disable_panels()
 			end)
 			vim.notify("Diff highlights: off", vim.log.levels.INFO)
 		else
