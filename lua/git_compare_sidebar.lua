@@ -22,7 +22,8 @@ local M = {}
 -- Whether the diff sidebar panels are allowed to exist.  Toggled by :DiffToggle
 -- (via disable_panels/open_panels).  The TreeOpen handler honours this so panels
 -- stay gone across nvim-tree close/reopen cycles while diffing is off.
-M.enabled = true
+-- Off by default, matching git_compare_hl.M.enabled.
+M.enabled = false
 
 local sidebar_ns = vim.api.nvim_create_namespace("git_compare_sidebar")
 

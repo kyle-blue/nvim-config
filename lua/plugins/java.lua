@@ -26,6 +26,21 @@ local function get_java_executable()
 	return "java"
 end
 
+-- Resolve a candidate path to a real JDK home. A jenv entry can point at a
+-- Homebrew formula root (e.g. /opt/homebrew/opt/openjdk@21) which has bin/java
+-- but no lib/modules — registering that as a runtime leaves jdtls unable to
+-- resolve even java.lang.Object. The `release` file marks an actual JDK home.
+local function resolve_jdk_home(path)
+	if vim.fn.filereadable(path .. "/release") == 1 then
+		return path
+	end
+	local nested = path .. "/libexec/openjdk.jdk/Contents/Home"
+	if vim.fn.filereadable(nested .. "/release") == 1 then
+		return nested
+	end
+	return nil
+end
+
 -- Build jdtls runtime list from jenv managed versions.
 -- Only considers major-version dirs (e.g. "17", "25") to avoid duplicates.
 local function get_jenv_runtimes()
@@ -38,12 +53,17 @@ local function get_jenv_runtimes()
 	for _, entry in ipairs(vim.fn.readdir(versions_dir)) do
 		local major = entry:match("^(%d+)$")
 		if major and tonumber(major) >= 11 then
-			local path = versions_dir .. "/" .. entry
-			if vim.fn.isdirectory(path) == 1 then
+			local jdk_home = resolve_jdk_home(versions_dir .. "/" .. entry)
+			if jdk_home then
 				table.insert(runtimes, {
 					name = "JavaSE-" .. major,
-					path = path,
+					path = jdk_home,
 				})
+			else
+				vim.notify(
+					"jenv version '" .. entry .. "' is not a valid JDK home — skipping jdtls runtime",
+					vim.log.levels.WARN
+				)
 			end
 		end
 	end

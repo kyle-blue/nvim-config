@@ -12,7 +12,8 @@
 
 local M = {}
 
-M.enabled = true
+-- Off by default; :DiffToggle turns the comparison highlights on.
+M.enabled = false
 
 -- ── Highlight group definitions ──────────────────────────────────────────────
 
