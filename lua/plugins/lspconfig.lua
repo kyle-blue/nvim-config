@@ -19,6 +19,7 @@ return {
 				cssls = {},
 				ts_ls = {},
 				gopls = {},
+				lemminx = {}, -- XML
 				rust_analyzer = {},
 				ruff = {}, -- Ruff has a native LSP for diagnostics
 				pyright = {
