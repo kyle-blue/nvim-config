@@ -38,18 +38,20 @@ return {
 				},
 			}
 
+			-- mason-lspconfig v2 dropped the `handlers` option, so per-server
+			-- config must be registered directly via vim.lsp.config.
+			vim.lsp.config("*", {
+				capabilities = require("blink.cmp").get_lsp_capabilities(),
+			})
+			for server_name, server_opts in pairs(servers) do
+				vim.lsp.config(server_name, server_opts)
+			end
+
 			require("mason-lspconfig").setup({
 				ensure_installed = vim.tbl_keys(servers),
-				automatic_enable = true,
-				automatic_installation = true,
-				handlers = {
-					function(server_name)
-						local server_opts = servers[server_name] or {}
-						server_opts.capabilities = require("blink.cmp").get_lsp_capabilities(server_opts.capabilities)
-						vim.lsp.config(server_name, server_opts)
-						vim.lsp.enable(server_name)
-					end,
-				},
+				-- jdtls is managed by nvim-jdtls (java.lua); auto-enabling it here
+				-- attaches a second, unconfigured jdtls client to every Java buffer
+				automatic_enable = { exclude = { "jdtls" } },
 			})
 
 			-- 2. Setup Formatters and Linters to auto-install

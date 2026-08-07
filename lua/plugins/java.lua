@@ -59,8 +59,11 @@ local function build_jdtls_config()
 	end
 
 	local java_executable = get_java_executable()
-	local project_name = vim.fn.fnamemodify(vim.fn.getcwd(), ":p:h:t")
-	local workspace_dir = vim.fn.stdpath("data") .. "/jdtls-workspace/" .. project_name
+	local root_dir = require("jdtls.setup").find_root({ "gradlew", "mvnw", "pom.xml", "build.gradle", ".git" })
+	-- Key the workspace on the full root path (not the basename) so same-named
+	-- projects get separate indexes and any cwd inside a project maps to one workspace.
+	local workspace_name = vim.fn.fnamemodify(root_dir or vim.fn.getcwd(), ":p:h"):gsub("[/\\]", "%%")
+	local workspace_dir = vim.fn.stdpath("data") .. "/jdtls-workspace/" .. workspace_name
 
 	-- DAP bundles: java-debug-adapter enables breakpoints, java-test enables test running
 	local bundles = {}
@@ -89,7 +92,7 @@ local function build_jdtls_config()
 			workspace_dir,
 		},
 
-		root_dir = require("jdtls.setup").find_root({ "gradlew", "mvnw", "pom.xml", "build.gradle", ".git" }),
+		root_dir = root_dir,
 
 		capabilities = require("blink.cmp").get_lsp_capabilities(),
 
