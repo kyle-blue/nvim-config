@@ -24,17 +24,15 @@ return {
 					"scss",
 				},
 				auto_install = true,
-				highlight = {
-					enable = true,
-					additional_vim_regex_highlighting = { "ruby" },
-				},
-				indent = { enable = true, disable = { "ruby" } },
+				-- Only accepts true or a list of languages; starts treesitter for every installed parser
+				highlight = true,
 			})
 
+			-- The plugin matches filetype to parser name, so htmlangular needs starting manually
 			vim.treesitter.language.register("angular", "htmlangular")
 
 			vim.api.nvim_create_autocmd("FileType", {
-				pattern = { "svelte", "htmlangular" },
+				pattern = "htmlangular",
 				callback = function()
 					vim.treesitter.start()
 				end,
