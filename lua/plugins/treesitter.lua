@@ -18,6 +18,10 @@ return {
 					"vim",
 					"vimdoc",
 					"svelte",
+					"angular",
+					"typescript",
+					"css",
+					"scss",
 				},
 				auto_install = true,
 				highlight = {
@@ -27,8 +31,10 @@ return {
 				indent = { enable = true, disable = { "ruby" } },
 			})
 
+			vim.treesitter.language.register("angular", "htmlangular")
+
 			vim.api.nvim_create_autocmd("FileType", {
-				pattern = "svelte",
+				pattern = { "svelte", "htmlangular" },
 				callback = function()
 					vim.treesitter.start()
 				end,
