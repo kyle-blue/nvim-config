@@ -23,9 +23,15 @@ return {
 			jsonc = { "biome-check" },
 			css = { "biome-check" },
 			svelte = { "biome" },
-			-- Prettier 3 picks its angular parser for *.component.html; uses the project's prettier when present
-			htmlangular = { "prettier" },
+			htmlangular = { "prettier_angular" },
 			-- Go and Rust fall back to gopls/rust_analyzer via lsp_format fallback
+		},
+		formatters = {
+			-- Newer Angular templates (app.html) aren't named *.component.html, so prettier can't infer the parser
+			prettier_angular = {
+				inherit = "prettier",
+				append_args = { "--parser", "angular" },
+			},
 		},
 		format_on_save = function(bufnr)
 			if vim.g.disable_autoformat or vim.b[bufnr].disable_autoformat then
