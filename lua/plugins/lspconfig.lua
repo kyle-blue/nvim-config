@@ -18,6 +18,16 @@ return {
 				html = {},
 				cssls = {},
 				ts_ls = {},
+				-- Only attaches inside Angular workspaces (see lua/angular.lua)
+				angularls = {
+					filetypes = { "typescript", "htmlangular" },
+					root_dir = function(bufnr, on_dir)
+						local root = require("angular").root(vim.api.nvim_buf_get_name(bufnr))
+						if root then
+							on_dir(root)
+						end
+					end,
+				},
 				gopls = {},
 				lemminx = {}, -- XML
 				rust_analyzer = {},
@@ -59,6 +69,7 @@ return {
 			require("mason-tool-installer").setup({
 				ensure_installed = {
 					"stylua",
+					"prettier", -- Angular templates
 					-- Java: jdtls is the LSP; the other two add DAP and test running support
 					"jdtls",
 					"java-debug-adapter",
@@ -92,7 +103,11 @@ return {
 						Snacks.picker.lsp_workspace_symbols()
 					end, "[W]orkspace [S]ymbols")
 
-					map("<leader>rn", vim.lsp.buf.rename, "[R]e[n]ame Symbol")
+					map("<leader>rn", function()
+						-- angularls renames across TS and templates; letting ts_ls also run would apply edits twice
+						local angular = vim.lsp.get_clients({ bufnr = event.buf, name = "angularls" })[1]
+						vim.lsp.buf.rename(nil, angular and { name = "angularls" } or nil)
+					end, "[R]e[n]ame Symbol")
 					map("<leader>ra", vim.lsp.buf.code_action, "[R]efactor [A]ctions", { "n", "x" })
 
 					-- Inlay Hints
