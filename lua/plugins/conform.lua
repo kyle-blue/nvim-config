@@ -23,6 +23,8 @@ return {
 			jsonc = { "biome-check" },
 			css = { "biome-check" },
 			svelte = { "biome" },
+			-- Prettier 3 picks its angular parser for *.component.html; uses the project's prettier when present
+			htmlangular = { "prettier" },
 			-- Go and Rust fall back to gopls/rust_analyzer via lsp_format fallback
 		},
 		format_on_save = function(bufnr)
