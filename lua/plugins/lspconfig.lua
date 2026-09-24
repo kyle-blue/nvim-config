@@ -69,7 +69,8 @@ return {
 			require("mason-tool-installer").setup({
 				ensure_installed = {
 					"stylua",
-					"prettier", -- Angular templates
+					"prettier", -- Angular (fallback when prettierd is missing)
+					"prettierd", -- Angular: daemonised prettier, ~40ms per format once warm
 					-- Java: jdtls is the LSP; the other two add DAP and test running support
 					"jdtls",
 					"java-debug-adapter",

@@ -1,3 +1,9 @@
+local function uses_prettier(bufnr)
+	local ft = vim.bo[bufnr].filetype
+	return ft == "htmlangular"
+		or (ft == "typescript" and require("angular").root(vim.api.nvim_buf_get_name(bufnr)) ~= nil)
+end
+
 return {
 	"stevearc/conform.nvim",
 	event = { "BufWritePre" },
@@ -19,7 +25,7 @@ return {
 			-- Biome leaves Angular's inline `template`/`styles` untouched; prettier formats them as HTML/CSS
 			typescript = function(bufnr)
 				if require("angular").root(vim.api.nvim_buf_get_name(bufnr)) then
-					return { "prettier" }
+					return { "prettierd", "prettier", stop_after_first = true }
 				end
 				return { "biome-check" }
 			end,
@@ -29,7 +35,7 @@ return {
 			jsonc = { "biome-check" },
 			css = { "biome-check" },
 			svelte = { "biome" },
-			htmlangular = { "prettier_angular" },
+			htmlangular = { "prettierd_angular", "prettier_angular", stop_after_first = true },
 			-- Go and Rust fall back to gopls/rust_analyzer via lsp_format fallback
 		},
 		formatters = {
@@ -38,13 +44,29 @@ return {
 				inherit = "prettier",
 				append_args = { "--parser", "angular" },
 			},
+			-- prettierd takes no CLI flags, so pose as a *.component.html file (same dir keeps config lookup intact)
+			prettierd_angular = {
+				inherit = "prettierd",
+				args = function(_, ctx)
+					if ctx.filename:match("%.component%.html$") then
+						return { ctx.filename }
+					end
+					return { (ctx.filename:gsub("%.html$", ".component.html")) }
+				end,
+			},
 		},
+		-- Prettier-formatted Angular buffers format asynchronously after save (the daemon's first start takes ~1s)
 		format_on_save = function(bufnr)
-			if vim.g.disable_autoformat or vim.b[bufnr].disable_autoformat then
+			if vim.g.disable_autoformat or vim.b[bufnr].disable_autoformat or uses_prettier(bufnr) then
 				return
 			end
-			-- prettier (node startup) regularly takes ~400ms
-			return { timeout_ms = 1500, lsp_format = "fallback" }
+			return { timeout_ms = 500, lsp_format = "fallback" }
+		end,
+		format_after_save = function(bufnr)
+			if vim.g.disable_autoformat or vim.b[bufnr].disable_autoformat or not uses_prettier(bufnr) then
+				return
+			end
+			return { lsp_format = "fallback" }
 		end,
 	},
 	init = function()
