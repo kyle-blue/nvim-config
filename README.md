@@ -90,3 +90,14 @@ You should see no tmux related errors when running `:checkhealth`
 - Install Go for golang (gopls) language server
 - Templ CLI (which includes LSP)
 - Install tailwindcss lsp: `npm install -g @tailwindcss/language-server`
+
+### Angular
+
+Angular tooling only activates inside Angular workspaces (an `angular.json`, or a `package.json` depending on `@angular/core`).
+
+- Install the Angular language server globally: `npm install -g @angular/language-server`
+- Installed automatically by Mason on first launch (Node/npm required):
+    - `angular-language-server` (angularls)
+    - `prettierd` — prettier daemon used to format Angular `.ts` files (including inline `template`/`styles`) and `.html` templates
+    - `prettier` — fallback formatter if prettierd is unavailable
+- The prettierd daemon keeps running in the background; use `prettierd restart` if it doesn't pick up `.prettierrc` changes, or `prettierd stop` to shut it down
