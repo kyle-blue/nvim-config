@@ -4,6 +4,18 @@ local function uses_prettier(bufnr)
 		or (ft == "typescript" and require("angular").root(vim.api.nvim_buf_get_name(bufnr)) ~= nil)
 end
 
+-- prettierd daemons are keyed by cwd and outlive nvim, so remember where this session started them
+local prettierd_daemons = {}
+
+local function tracked_prettierd_cwd(self, ctx)
+	local builtin = require("conform.formatters.prettierd")
+	local cwd = builtin.cwd(self, ctx)
+	local command = type(self.command) == "function" and self.command(self, ctx) or self.command
+	local dir = cwd or vim.fn.getcwd()
+	prettierd_daemons[command .. "\0" .. dir] = { command = command, dir = dir }
+	return cwd
+end
+
 return {
 	"stevearc/conform.nvim",
 	event = { "BufWritePre" },
@@ -39,6 +51,7 @@ return {
 			-- Go and Rust fall back to gopls/rust_analyzer via lsp_format fallback
 		},
 		formatters = {
+			prettierd = { cwd = tracked_prettierd_cwd },
 			-- Newer Angular templates (app.html) aren't named *.component.html, so prettier can't infer the parser
 			prettier_angular = {
 				inherit = "prettier",
@@ -47,6 +60,7 @@ return {
 			-- prettierd takes no CLI flags, so pose as a *.component.html file (same dir keeps config lookup intact)
 			prettierd_angular = {
 				inherit = "prettierd",
+				cwd = tracked_prettierd_cwd,
 				args = function(_, ctx)
 					if ctx.filename:match("%.component%.html$") then
 						return { ctx.filename }
@@ -70,6 +84,16 @@ return {
 		end,
 	},
 	init = function()
+		-- stop-local only stops this cwd's daemon; the next format in another session simply relaunches it
+		vim.api.nvim_create_autocmd("VimLeavePre", {
+			group = vim.api.nvim_create_augroup("PrettierdCleanup", { clear = true }),
+			callback = function()
+				for _, daemon in pairs(prettierd_daemons) do
+					pcall(vim.system, { daemon.command, "stop-local" }, { cwd = daemon.dir, detach = true })
+				end
+			end,
+		})
+
 		vim.api.nvim_create_user_command("FormatDisable", function(args)
 			if args.bang then
 				vim.b.disable_autoformat = true

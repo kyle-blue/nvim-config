@@ -100,4 +100,4 @@ Angular tooling only activates inside Angular workspaces (an `angular.json`, or 
     - `angular-language-server` (angularls)
     - `prettierd` — prettier daemon used to format Angular `.ts` files (including inline `template`/`styles`) and `.html` templates
     - `prettier` — fallback formatter if prettierd is unavailable
-- The prettierd daemon keeps running in the background; use `prettierd restart` if it doesn't pick up `.prettierrc` changes, or `prettierd stop` to shut it down
+- nvim starts a prettierd daemon per project on first format and stops it on exit (it relaunches automatically on the next format). Use `prettierd restart` if it doesn't pick up `.prettierrc` changes
