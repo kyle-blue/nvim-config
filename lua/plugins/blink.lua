@@ -38,7 +38,15 @@ return {
 		},
 
 		sources = {
-			default = { "lsp", "path", "snippets", "buffer" },
+			default = { "lsp", "angular", "path", "snippets", "buffer" },
+			providers = {
+				-- Lifecycle hooks in Angular classes (see lua/angular_completion.lua)
+				angular = {
+					name = "Angular",
+					module = "angular_completion",
+					score_offset = 5,
+				},
+			},
 		},
 
 		keymap = {
