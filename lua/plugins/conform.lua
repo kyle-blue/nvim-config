@@ -16,7 +16,13 @@ return {
 		formatters_by_ft = {
 			lua = { "stylua" },
 			javascript = { "biome-check" },
-			typescript = { "biome-check" },
+			-- Biome leaves Angular's inline `template`/`styles` untouched; prettier formats them as HTML/CSS
+			typescript = function(bufnr)
+				if require("angular").root(vim.api.nvim_buf_get_name(bufnr)) then
+					return { "prettier" }
+				end
+				return { "biome-check" }
+			end,
 			javascriptreact = { "biome-check" },
 			typescriptreact = { "biome-check" },
 			json = { "biome-check" },
@@ -37,7 +43,8 @@ return {
 			if vim.g.disable_autoformat or vim.b[bufnr].disable_autoformat then
 				return
 			end
-			return { timeout_ms = 500, lsp_format = "fallback" }
+			-- prettier (node startup) regularly takes ~400ms
+			return { timeout_ms = 1500, lsp_format = "fallback" }
 		end,
 	},
 	init = function()
