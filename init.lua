@@ -8,4 +8,6 @@ require("core.diagnostics")
 
 require("core.filetypes")
 
+require("core.commands")
+
 require("core.lazy")
