@@ -92,20 +92,18 @@ return {
 		tree_api.events.subscribe(tree_api.events.Event.TreeRendered, mark_current_file)
 
 		-- Opening reveals the current file (parents expanded, cursor on it) when it
-		-- lives under the cwd; otherwise the tree opens as it was left.
+		-- lives under the cwd; otherwise the tree opens as it was left. With
+		-- :DiffToggle on, the sidebar restores its own remembered position instead.
 		vim.keymap.set("n", "\\", function()
 			local path = vim.uv.fs_realpath(vim.api.nvim_buf_get_name(0))
 			local cwd = vim.uv.fs_realpath(vim.fn.getcwd())
-			local in_workspace = path ~= nil
+			local ok, sidebar = pcall(require, "git_compare_sidebar")
+			local reveal = not (ok and sidebar.enabled)
+				and path ~= nil
 				and cwd ~= nil
 				and vim.bo.buftype == ""
 				and vim.startswith(path, cwd .. "/")
-			if in_workspace and not tree_win() then
-				pcall(function()
-					require("git_compare_sidebar").forget_saved_pos()
-				end)
-			end
-			tree_api.tree.toggle({ find_file = in_workspace, focus = true })
+			tree_api.tree.toggle({ find_file = reveal, focus = true })
 		end, { desc = "Toggle NvimTree" })
 		-- Also <leader>tr to reset to cwd root (tree root). Config below
 

@@ -653,12 +653,6 @@ function create_panels()
 	end)
 end
 
--- Drop the remembered left-panel position so the next open keeps whatever
--- cursor/focus nvim-tree itself sets up (e.g. after revealing a file).
-function M.forget_saved_pos()
-	_saved_left_pos = nil
-end
-
 -- ── Setup ─────────────────────────────────────────────────────────────────────
 
 function M.setup()
