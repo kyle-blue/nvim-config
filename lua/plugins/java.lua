@@ -7,67 +7,57 @@ local function get_java_executable()
 		end
 	end
 
-	-- Nvim may launch without jenv shell integration so JAVA_HOME might not be set.
-	-- Call jenv directly to resolve the active version.
-	local jenv_bin = vim.fn.expand("~/.jenv/bin/jenv")
-	if vim.fn.executable(jenv_bin) == 1 then
-		local result = vim.fn.system(jenv_bin .. " java-home 2>/dev/null")
-		if vim.v.shell_error == 0 then
-			local home = vim.trim(result)
-			if home ~= "" then
-				local java = home .. "/bin/java"
-				if vim.fn.executable(java) == 1 then
-					return java
-				end
-			end
-		end
+	-- Nvim may launch without SDKMAN shell integration so JAVA_HOME might not be set.
+	-- Fall back to SDKMAN's default ("current") JDK.
+	local java = vim.fn.expand("~/.sdkman/candidates/java/current/bin/java")
+	if vim.fn.executable(java) == 1 then
+		return java
 	end
 
 	return "java"
 end
 
--- Resolve a candidate path to a real JDK home. A jenv entry can point at a
--- Homebrew formula root (e.g. /opt/homebrew/opt/openjdk@21) which has bin/java
--- but no lib/modules — registering that as a runtime leaves jdtls unable to
--- resolve even java.lang.Object. The `release` file marks an actual JDK home.
-local function resolve_jdk_home(path)
-	if vim.fn.filereadable(path .. "/release") == 1 then
-		return path
+-- Read the major version from a JDK home's `release` file (e.g. JAVA_VERSION="25.0.5").
+-- The `release` file also marks a real JDK home, so nil means "not a JDK".
+local function jdk_major_version(home)
+	local release = home .. "/release"
+	if vim.fn.filereadable(release) ~= 1 then
+		return nil
 	end
-	local nested = path .. "/libexec/openjdk.jdk/Contents/Home"
-	if vim.fn.filereadable(nested .. "/release") == 1 then
-		return nested
+	for _, line in ipairs(vim.fn.readfile(release)) do
+		local major = line:match('^JAVA_VERSION="(%d+)')
+		if major then
+			return tonumber(major)
+		end
 	end
 	return nil
 end
 
--- Build jdtls runtime list from jenv managed versions.
--- Only considers major-version dirs (e.g. "17", "25") to avoid duplicates.
-local function get_jenv_runtimes()
+-- Build jdtls runtime list from SDKMAN-installed JDKs. jdtls rejects duplicate
+-- runtime names, so keep one JDK per major version (the newest by dir name).
+local function get_sdkman_runtimes()
 	local runtimes = {}
-	local versions_dir = vim.fn.expand("~/.jenv/versions")
-	if vim.fn.isdirectory(versions_dir) ~= 1 then
+	local candidates_dir = vim.fn.expand("~/.sdkman/candidates/java")
+	if vim.fn.isdirectory(candidates_dir) ~= 1 then
 		return runtimes
 	end
 
-	for _, entry in ipairs(vim.fn.readdir(versions_dir)) do
-		local major = entry:match("^(%d+)$")
-		if major and tonumber(major) >= 11 then
-			local jdk_home = resolve_jdk_home(versions_dir .. "/" .. entry)
-			if jdk_home then
-				table.insert(runtimes, {
-					name = "JavaSE-" .. major,
-					path = jdk_home,
-				})
-			else
-				vim.notify(
-					"jenv version '" .. entry .. "' is not a valid JDK home — skipping jdtls runtime",
-					vim.log.levels.WARN
-				)
+	local by_major = {}
+	local entries = vim.fn.readdir(candidates_dir)
+	table.sort(entries)
+	for _, entry in ipairs(entries) do
+		if entry ~= "current" then
+			local home = candidates_dir .. "/" .. entry
+			local major = jdk_major_version(home)
+			if major and major >= 11 then
+				by_major[major] = home
 			end
 		end
 	end
 
+	for major, home in pairs(by_major) do
+		table.insert(runtimes, { name = "JavaSE-" .. major, path = home })
+	end
 	return runtimes
 end
 
@@ -119,7 +109,7 @@ local function build_jdtls_config()
 		settings = {
 			java = {
 				configuration = {
-					runtimes = get_jenv_runtimes(),
+					runtimes = get_sdkman_runtimes(),
 				},
 				eclipse = { downloadSources = true },
 				maven = { downloadSources = true },
