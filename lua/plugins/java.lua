@@ -87,9 +87,18 @@ local function build_jdtls_config()
 		table.insert(bundles, debug_jar)
 	end
 
+	-- Skip jars that aren't OSGi bundles (runner, jacoco agent) and the asm bundle jdtls
+	-- already ships; loading them fails with "Failed to load extension bundles".
 	local test_jars = vim.fn.glob(mason_data .. "/java-test/extension/server/*.jar", true, true)
-	if type(test_jars) == "table" then
-		vim.list_extend(bundles, test_jars)
+	for _, jar in ipairs(test_jars) do
+		local name = vim.fn.fnamemodify(jar, ":t")
+		if
+			name ~= "com.microsoft.java.test.runner-jar-with-dependencies.jar"
+			and name ~= "jacocoagent.jar"
+			and not name:match("^org%.objectweb%.asm_")
+		then
+			table.insert(bundles, jar)
+		end
 	end
 
 	local config = {
