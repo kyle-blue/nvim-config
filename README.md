@@ -91,6 +91,21 @@ You should see no tmux related errors when running `:checkhealth`
 - Templ CLI (which includes LSP)
 - Install tailwindcss lsp: `npm install -g @tailwindcss/language-server`
 
+### Java
+
+Java tooling uses [nvim-jdtls](https://github.com/mfussenegger/nvim-jdtls) (see `lua/plugins/java.lua`).
+
+- Installed automatically by Mason on first launch: `jdtls`, `java-debug-adapter`, `java-test`
+- A JDK (17+) is required to run jdtls. Any JDK works, but this config is set up for [SDKMAN](https://sdkman.io/):
+    - Install SDKMAN: `curl -s "https://get.sdkman.io" | bash`
+    - Install JDKs: `sdk install java <version>` (list them with `sdk list java`, e.g. `25.0.5.0+8-tem`)
+    - Install Maven: `sdk install maven`
+- jdtls runs on `$JAVA_HOME` if set, otherwise on SDKMAN's default JDK (`~/.sdkman/candidates/java/current`)
+- Every JDK in `~/.sdkman/candidates/java` is registered with jdtls as a `JavaSE-<major>` runtime, so a project's `maven.compiler.release` picks the matching JDK
+- If Maven downloads go through an internal repository with a private CA, import its certificate into each JDK's trust store, or jdtls and `mvn` fail with `PKIX path building failed`:
+  `keytool -importcert -trustcacerts -cacerts -storepass changeit -noprompt -alias <alias> -file <cert.crt>`
+  (use the `keytool` in that JDK's `bin` directory; repeat after installing a new JDK)
+
 ### Angular
 
 Angular tooling only activates inside Angular workspaces (an `angular.json`, or a `package.json` depending on `@angular/core`).
