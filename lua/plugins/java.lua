@@ -61,6 +61,48 @@ local function get_sdkman_runtimes()
 	return runtimes
 end
 
+-- Find the top of a Maven multi-module build without relying on mvnw.
+-- Starts at the nearest pom.xml and climbs while the parent dir's pom lists
+-- the current dir in <modules>. Stops at an unrelated pom above, so the root
+-- never escapes into an enclosing project that doesn't own this one.
+-- Returns nil only when there is no pom.xml above start_dir at all.
+local function maven_aggregator_root(start_dir)
+	local pom = vim.fs.find("pom.xml", { upward = true, path = start_dir })[1]
+	if not pom then
+		return nil
+	end
+	local dir = vim.fs.dirname(pom)
+	while true do
+		local parent = vim.fs.dirname(dir)
+		local parent_pom = parent .. "/pom.xml"
+		if parent == dir or vim.fn.filereadable(parent_pom) == 0 then
+			break
+		end
+		local text = table.concat(vim.fn.readfile(parent_pom), "\n")
+		local name = vim.pesc(vim.fs.basename(dir))
+		-- <module> is Maven 3; Maven 4 renames it to <subproject>
+		local listed = text:find("<module>%s*" .. name .. "%s*</module>")
+			or text:find("<subproject>%s*" .. name .. "%s*</subproject>")
+		if not listed then
+			break
+		end
+		dir = parent
+	end
+	return dir
+end
+
+-- jdtls only resolves sibling modules against each other when they share one
+-- workspace, so the root must be the top of the build, not the nearest module.
+-- Order: wrapper / Gradle settings, then the Maven <modules> chain, then a
+-- plain build file or .git for anything that isn't a Maven project.
+local function find_project_root()
+	local buf_name = vim.api.nvim_buf_get_name(0)
+	local start_dir = buf_name ~= "" and vim.fs.dirname(buf_name) or vim.fn.getcwd()
+	return vim.fs.root(0, { "mvnw", "gradlew", "settings.gradle", "settings.gradle.kts" })
+		or maven_aggregator_root(start_dir)
+		or vim.fs.root(0, { "build.gradle", "build.gradle.kts", ".git" })
+end
+
 local function build_jdtls_config()
 	local mason_bin = vim.fn.stdpath("data") .. "/mason/bin/jdtls"
 	if vim.fn.executable(mason_bin) ~= 1 then
@@ -69,7 +111,7 @@ local function build_jdtls_config()
 	end
 
 	local java_executable = get_java_executable()
-	local root_dir = require("jdtls.setup").find_root({ "gradlew", "mvnw", "pom.xml", "build.gradle", ".git" })
+	local root_dir = find_project_root()
 	-- Key the workspace on the full root path (not the basename) so same-named
 	-- projects get separate indexes and any cwd inside a project maps to one workspace.
 	local workspace_name = vim.fn.fnamemodify(root_dir or vim.fn.getcwd(), ":p:h"):gsub("[/\\]", "%%")
